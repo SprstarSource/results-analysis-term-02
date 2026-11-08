@@ -624,6 +624,12 @@ Private Function Canon(ByVal x As Variant) As Variant
         Canon = L("exp")
     ElseIf InStr(t, Norm(L("f_math"))) > 0 Then
         Canon = L("math")
+    ElseIf InStr(t, Norm(L("w_fine"))) > 0 Then
+        Canon = L("w_fine")
+    ElseIf InStr(t, Norm(L("w_train"))) > 0 Then
+        Canon = L("w_train")
+    ElseIf InStr(t, Norm(L("w_voced"))) > 0 Then
+        Canon = L("w_voced")
     Else
         Canon = Trim$(CStr(x))
     End If
@@ -668,6 +674,9 @@ Private Function L(ByVal key As String) As String
     Case "f_tech": L = Txt("62A 642 646 64A")
     Case "f_mgmt": L = Txt("62A 633 64A 64A 631")
     Case "f_exp": L = Txt("639 644 648 645")
+    Case "w_fine": L = Txt("641 646 648 646")
+    Case "w_train": L = Txt("62A 643 648 64A 646 20 645 647 646 64A")
+    Case "w_voced": L = Txt("62A 639 644 64A 645 20 645 647 646 64A")
     End Select
 End Function
 
@@ -854,9 +863,9 @@ Private Function KnownWish(ByVal x As Variant, Optional ByVal isArts As Boolean 
     End If
     t = Norm(x)
     If isArts Then
-        labels = Array(ArtsText("arts"), ArtsText("lang"))
+        labels = Array(ArtsText("arts"), ArtsText("lang"), L("w_fine"), L("w_train"), L("w_voced"))
     Else
-        labels = Array(L("math"), L("tech"), L("exp"), L("mgmt"))
+        labels = Array(L("math"), L("tech"), L("exp"), L("mgmt"), L("w_fine"), L("w_train"), L("w_voced"))
     End If
     For k = LBound(labels) To UBound(labels)
         If t = Norm(labels(k)) Then

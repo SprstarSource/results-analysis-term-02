@@ -210,8 +210,8 @@ Private Sub ValidateArtsData(ByRef v As Variant, ByVal date1904 As Boolean, ByVa
             If Not TryBirthDate(v(i, 3), date1904, d) Then AddValidationIssue problems, location, "C"
         End If
         w1 = ArtsWish(v(i, 11)): w2 = ArtsWish(v(i, 12))
-        If IsError(v(i, 11)) Or (Not BlankValue(v(i, 11)) And w1 = 0) Then AddValidationIssue problems, location, "K"
-        If IsError(v(i, 12)) Or (Not BlankValue(v(i, 12)) And w2 = 0) Then AddValidationIssue problems, location, "L"
+        If IsError(v(i, 11)) Or (Not BlankValue(v(i, 11)) And w1 = 0 And Not IsIgnoredWish(v(i, 11))) Then AddValidationIssue problems, location, "K"
+        If IsError(v(i, 12)) Or (Not BlankValue(v(i, 12)) And w2 = 0 And Not IsIgnoredWish(v(i, 12))) Then AddValidationIssue problems, location, "L"
         If w1 > 0 And w1 = w2 Then AddValidationIssue problems, location, "K=L"
     Next i
     RaiseValidationIssues problems, "Letters=invalid/missing columns; K=L=repeated non-empty wishes."
@@ -865,6 +865,22 @@ Private Function WishBranch(ByVal x As Variant) As Long
     End If
 End Function
 
+' Accepted but ignored wishes (fine arts / vocational training / vocational education):
+' never invalid, never counted, treated exactly like an empty cell.
+Private Function IsIgnoredWish(ByVal x As Variant) As Boolean
+    Dim t As String
+    If IsError(x) Then Exit Function
+    t = Norm(x)
+    If Len(t) = 0 Then Exit Function
+    If InStr(t, Norm(L("w_fine"))) > 0 Then
+        IsIgnoredWish = True
+    ElseIf InStr(t, Norm(L("w_train"))) > 0 Then
+        IsIgnoredWish = True
+    ElseIf InStr(t, Norm(L("w_voced"))) > 0 Then
+        IsIgnoredWish = True
+    End If
+End Function
+
 Private Function IsRepeater(ByVal x As Variant) As Boolean
     If IsError(x) Then Exit Function
     IsRepeater = (Norm(x) = g_yes)
@@ -962,6 +978,9 @@ Private Function L(ByVal key As String) As String
     Case "f_tech": L = Txt("62A 642 646 64A")
     Case "f_mgmt": L = Txt("62A 633 64A 64A 631")
     Case "f_exp": L = Txt("639 644 648 645")
+    Case "w_fine": L = Txt("641 646 648 646")
+    Case "w_train": L = Txt("62A 643 648 64A 646 20 645 647 646 64A")
+    Case "w_voced": L = Txt("62A 639 644 64A 645 20 645 647 646 64A")
     End Select
 End Function
 
@@ -1091,10 +1110,10 @@ Private Sub ValidateGuidanceData(ByRef v As Variant, ByVal date1904 As Boolean, 
             If Not TryBirthDate(v(i, C_BIRTH), date1904, d) Then AddValidationIssue problems, location, "C"
         End If
         b1 = WishBranch(v(i, C_W1)): b2 = WishBranch(v(i, C_W2))
-        If IsError(v(i, C_W1)) Or (Not BlankValue(v(i, C_W1)) And b1 = 0) Then
+        If IsError(v(i, C_W1)) Or (Not BlankValue(v(i, C_W1)) And b1 = 0 And Not IsIgnoredWish(v(i, C_W1))) Then
             AddValidationIssue problems, location, "O"
         End If
-        If IsError(v(i, C_W2)) Or (Not BlankValue(v(i, C_W2)) And b2 = 0) Then
+        If IsError(v(i, C_W2)) Or (Not BlankValue(v(i, C_W2)) And b2 = 0 And Not IsIgnoredWish(v(i, C_W2))) Then
             AddValidationIssue problems, location, "P"
         End If
         ' Empty + empty remains valid.
