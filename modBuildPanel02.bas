@@ -13,7 +13,7 @@ Private Function PanelActions() As Variant
     ' Second Term Analysis, Cumulative Term Average and Split Term Results work on the raw files of Source02: no previous step is required.
     PanelActions = Array( _
         Array("btnCollect", "Second Term Results", "CollectTerm02Results", False, &H60AE27), _
-        Array("btnDistribute", "Second Term Analysis", "modBiuldAnalysisfilesBuildAll02.Build_All", False, &HB98029), _
+        Array("btnDistribute", "Second Term Analysis", "modAnalysisBuilderBuildAll02.Build_All", False, &HB98029), _
         Array("btnAverage", "Cumulative Term Average", "CumulativeTermAverage", False, &HAD448E), _
         Array("btnSplitTerms", "Split Term Results", "modSplitTermResults.SplitTermResults", False, &H85A016), _
         Array("btnExamen", "Examen Analysis", "modExamenAnalysis02.Run_ExamenAnalysis02", False, &HA05568), _
@@ -182,7 +182,7 @@ End Sub
 ' last run, duration, success and the time of every file). Silent when the module is not imported.
 Private Sub BuildStatusSheetSafe()
     On Error Resume Next
-    Application.Run PanelMacroAction("modBiuldAnalysisfilesBuildAll02.Status_CreateSheet")
+    Application.Run PanelMacroAction("modAnalysisBuilderBuildAll02.Status_CreateSheet")
     Err.Clear
 End Sub
 
