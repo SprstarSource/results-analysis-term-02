@@ -25,7 +25,7 @@ Private m_silent As Boolean
 Private m_lastReport As String
 Private m_lastOutputPath As String
 
-Private Const OUTPUT_BASE_NAME As String = "OrientationResults02"
+Private Const OUTPUT_BASE_CODES As String = "646 62A 627 626 62C 20 627 644 62A 648 62C 64A 647 20 627 644 62A 62F 631 64A 62C 64A 20 644 644 641 635 644 20 30 32"
 Private Const OUTPUT_EXT As String = ".xlsx"
 
 ' Folder name: "معالجة بيانات الفصل 02" stored as hex code points
@@ -241,6 +241,10 @@ Private Function OutputFolderName() As String
     OutputFolderName = ArText(OUTPUT_FOLDER_CODES)
 End Function
 
+Private Function OutputBaseName() As String
+    OutputBaseName = ArText(OUTPUT_BASE_CODES)
+End Function
+
 Private Function EnsureOutputFolder() As String
     Dim fso As Object
     Dim folderPath As String
@@ -272,7 +276,7 @@ Private Function GetNextAvailableOutputPath(ByVal folderPath As String) As Strin
     Set fso = CreateObject("Scripting.FileSystemObject")
 
     ' First try OrientationResults02.xlsx; if it exists or is open, try _01, _02, ...
-    candidateName = OUTPUT_BASE_NAME & OUTPUT_EXT
+    candidateName = OutputBaseName() & OUTPUT_EXT
     candidatePath = folderPath & candidateName
     If Not fso.FileExists(candidatePath) And Not IsWorkbookNameOpen(candidateName) Then
         GetNextAvailableOutputPath = candidatePath
@@ -281,7 +285,7 @@ Private Function GetNextAvailableOutputPath(ByVal folderPath As String) As Strin
 
     seq = 1
     Do
-        candidateName = OUTPUT_BASE_NAME & "_" & Format$(seq, "00") & OUTPUT_EXT
+        candidateName = OutputBaseName() & "_" & Format$(seq, "00") & OUTPUT_EXT
         candidatePath = folderPath & candidateName
         If Not fso.FileExists(candidatePath) And Not IsWorkbookNameOpen(candidateName) Then
             GetNextAvailableOutputPath = candidatePath
