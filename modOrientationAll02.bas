@@ -9,7 +9,7 @@ Option Explicit
 '   Run_OrientationAll02
 '    0. checks that every input file needed by the steps exists, in the order of the steps
 '    1. modTransfer02            Data Transfer       Source02 -> Term02Guidance workbook BUILT IN MEMORY (not saved)
-'    2. modStreamPreferences02   Stream Preferences  StreamPreferences02.xlsx -> wishes (still in memory;
+'    2. modStreamPreferences02   Stream Preferences  wishes file in Source02 (found by structure) -> wishes (still in memory;
 '                                                    if it stops, a copy is saved)
 '    3. modOrientation02         Orientation         decisions + general report, then the workbook is SAVED
 '                                                    -> \معالجة بيانات الفصل 02\Term02Guidance[_NN].xlsx
@@ -22,7 +22,6 @@ Option Explicit
 
 Private Const TITLE_TXT As String = "Term 02 Orientation"
 Private Const SRC_FOLDER As String = "Source02"
-Private Const WISHES_FILE As String = "StreamPreferences02.xlsx"
 
 Private m_busy As Boolean
 
@@ -151,14 +150,16 @@ End Sub
 
 ' Returns "" when everything is there, otherwise the text for the FIRST missing item.
 Private Function CheckFiles(ByVal base As String) As String
+    Dim problem As String, wishPath As String
     If Not FolderHasExcelFiles(base & SRC_FOLDER) Then
         CheckFiles = "Step 1 (Data Transfer) needs the folder '" & SRC_FOLDER & "' with at least one Excel file in it:" & _
                      vbCrLf & base & SRC_FOLDER & vbCrLf & vbCrLf & "Put the term result files there, then run again."
         Exit Function
     End If
-    If Not FileThere(base & WISHES_FILE) Then
-        CheckFiles = "Step 2 (Stream Preferences) needs the file '" & WISHES_FILE & "' next to the tool:" & _
-                     vbCrLf & base & vbCrLf & vbCrLf & "Provide that file, then run again. Nothing has been changed."
+    problem = modStreamPreferences02.FindWishesFile(wishPath)
+    If Len(problem) > 0 Then
+        CheckFiles = "Step 2 (Stream Preferences) cannot start:" & vbCrLf & problem & vbCrLf & vbCrLf & _
+                     "Nothing has been changed."
         Exit Function
     End If
 End Function
