@@ -1,11 +1,11 @@
-Attribute VB_Name = "modBiuldAnalysisfilesCommon02"
+Attribute VB_Name = "modAnalysisBuilderCommon02"
 Option Explicit
 
 '==============================================================================
-' Module  : modBiuldAnalysisfilesCommon02
+' Module  : modAnalysisBuilderCommon02
 ' Purpose : Shared constants, text helpers, fonts, cell styles and the
 '           "discover what is inside the Data sheet" routine used by
-'           modBiuldAnalysisfilesAnalysis02 and modBiuldAnalysisfilesCartTec02.
+'           modAnalysisBuilderAnalysis02 and modAnalysisBuilderCartTec02.
 ' Notes   : - Pure ASCII: every Arabic text is built from hex code points (baf_ArT).
 '           - Formats / fonts / colours come from modExamenAnalysis02.
 '==============================================================================
@@ -212,7 +212,7 @@ End Sub
 
 ' Name of the output folder (next to the tool)
 Public Function baf_OutputFolderName() As String
-    baf_OutputFolderName = baf_ArT("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 644 641 635 644 20 627 644 62B 627 646 64A")
+    baf_OutputFolderName = baf_ArT("645 639 627 644 62C 629 20 628 64A 627 646 627 62A 20 627 644 641 635 644 20 30 32")
 End Function
 
 Private Function PickFont(ByVal ws As Worksheet, ParamArray names() As Variant) As String
