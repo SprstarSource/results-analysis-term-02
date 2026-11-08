@@ -8,7 +8,7 @@ Option Explicit
 '
 '   Run_OrientationAll02
 '    0. checks that every input file needed by the steps exists, in the order of the steps
-'    1. modTransfer02            Data Transfer       Source02 -> Term02Guidance workbook BUILT IN MEMORY (not saved)
+'    1. modTransfer02            Data Transfer       Source02 -> guidance workbook BUILT IN MEMORY (not saved)
 '    2. modStreamPreferences02   Stream Preferences  wishes file in Source02 (found by structure) -> wishes (still in memory;
 '                                                    if it stops, a copy is saved)
 '    3. modOrientation02         Orientation         decisions + general report, then the workbook is SAVED
