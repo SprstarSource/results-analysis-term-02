@@ -1,131 +1,139 @@
-import os
-import re
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+check_engine_sync.py
+====================
+يتحقق من أن النسخ المضمّنة من «محرك التجميع» داخل الموديلات متطابقة حرفياً.
+
+الخلفية: كل موديل مستقل يحمل نسخته الخاصة من المحرك (الإجراءات التي تبدأ بـ Src
+وكل إجراء مساعد يشاركها فيه أكثر من موديل). التعليق في رأس كل موديل ينص على
+"keep identical"، وهذا السكربت يجعل هذا الشرط قابلاً للفحص الآلي.
+
+الاستعمال:
+    python tools/check_engine_sync.py              # يفحص src/vba/*.bas
+    python tools/check_engine_sync.py path/to/*.bas
+
+رمز الخروج: 0 = متطابقة، 1 = اختلاف، 2 = خطأ استعمال.
+"""
 import glob
+import re
+import sys
+from collections import defaultdict
 
-# ضبط الحد الأدنى لعدد أسطر الدالة (ضع 0 لحماية جميع الدوال واجتياز فحص جيت هاب بالكامل، أو 8 للإجراءات الطويلة فقط)
-MIN_BODY_LINES = 0
+DEFAULT_GLOB = "src/vba/*.bas"
+# الموديلات التي تحمل نسخة مضمّنة من المحرك (تُستبعد البقية من المقارنة)
+EMBEDDED = ("modAverage02", "modSplitTermResults", "modCompare", "modTransfer02", "modAnalysisBuilderData02")
 
-PROC_START_RE = re.compile(
-    r'^(\s*)(?:(?:Public|Private|Friend)\s+)?(?:Static\s+)?(Sub|Function|Property)\s+([a-zA-Z0-9_]+)',
-    re.IGNORECASE
-)
-PROC_END_RE = re.compile(
-    r'^(\s*)End\s+(Sub|Function|Property)\b',
-    re.IGNORECASE
-)
-ERROR_HANDLER_RE = re.compile(
-    r'^\s*On\s+Error\s+(?:GoTo|Resume\s+Next)',
-    re.IGNORECASE
-)
-EXIT_PROC_RE = re.compile(
-    r'^\s*Exit\s+(?:Sub|Function|Property)\b',
-    re.IGNORECASE
-)
+# مساعدات مشتركة في الاسم لكنها خاصة بكل موديل عمداً (مجلد المخرجات) - لا تدخل في المقارنة
+EXCLUDE = {"EnsureFolder", "OutputFolderName", "FolderExistsPath", "FileExistsPath"}
 
-def read_bas_file(file_path):
-    for enc in ('utf-8', 'windows-1256', 'cp1252'):
+PROC_START = re.compile(r"^(?:Public |Private |Friend )?(?:Static )?(Sub|Function)\s+(\w+)", re.I)
+
+
+def read(path):
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    for enc in ("utf-8", "cp1256", "latin-1"):
         try:
-            with open(file_path, 'r', encoding=enc) as f:
-                return f.readlines(), enc
+            text = raw.decode(enc).replace("\r\n", "\n").replace("\r", "\n")
+            return strip_local_extensions(text)
         except UnicodeDecodeError:
             continue
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        return f.readlines(), 'utf-8'
+    raise RuntimeError("encoding not supported: " + path)
 
-def process_procedure(proc_lines):
-    # التحقق مما إذا كان الإجراء يحتوي مسبقا على معالج أخطاء
-    for line in proc_lines:
-        if ERROR_HANDLER_RE.search(line):
-            return proc_lines, False
 
-    # تخطي الدوال القصيرة إذا تم تحديد حد أدنى للأسطر
-    if len(proc_lines) - 2 < MIN_BODY_LINES:
-        return proc_lines, False
+# كتلة إضافية مقصودة في نسخة موديل واحد (مثل حفظ A1:A4 في modAnalysisBuilderData02)
+# تُحاط بسطري تعليق ولا تدخل في المقارنة:
+#     ' LOCAL-EXTENSION BEGIN ...
+#     ' LOCAL-EXTENSION END
+LOCAL_EXT = re.compile(r"^[ \t]*' LOCAL-EXTENSION BEGIN[^\n]*\n.*?^[ \t]*' LOCAL-EXTENSION END[^\n]*\n?", re.M | re.S)
 
-    start_match = PROC_START_RE.match(proc_lines[0])
-    if not start_match:
-        return proc_lines, False
 
-    base_indent = start_match.group(1)
-    proc_type = start_match.group(2).capitalize()
-    body_indent = base_indent + "    "
+def strip_local_extensions(text):
+    return LOCAL_EXT.sub("", text)
 
-    # تحديد نهاية سطر تعريف الدالة (في حال كان مقسما بعلامة _ على عدة أسطر)
-    header_end_idx = 0
-    while header_end_idx < len(proc_lines) - 1:
-        stripped = proc_lines[header_end_idx].rstrip('\r\n').rstrip()
-        if stripped.endswith('_'):
-            header_end_idx += 1
+
+def procedures(text):
+    """name -> normalised text of the procedure (from its header to End Sub/Function)."""
+    out, name, kind, buf = {}, None, None, []
+    for line in text.split("\n"):
+        if name is None:
+            m = PROC_START.match(line.strip())
+            if m:
+                kind, name, buf = m.group(1).lower(), m.group(2), [line.rstrip()]
         else:
-            break
+            buf.append(line.rstrip())
+            if re.match(r"^\s*End\s+%s\b" % kind, line, re.I):
+                out[name] = "\n".join(buf)
+                name = None
+    return out
 
-    # تحديد نوع سطر النهاية (CRLF أو LF) للحفاظ على توافق محرر الإكسيل
-    newline = '\r\n' if proc_lines[0].endswith('\r\n') else '\n'
 
-    # التحقق من وجود Exit Sub/Function قبل سطر النهاية لتجنب التكرار
-    last_code_line = ""
-    for line in reversed(proc_lines[header_end_idx + 1:-1]):
-        clean = line.strip()
-        if clean and not clean.startswith("'"):
-            last_code_line = clean
-            break
+def strip_comment(line):
+    """يحذف تعليق VBA (') من نهاية السطر مع احترام النصوص بين علامتي اقتباس."""
+    in_str = False
+    for i, ch in enumerate(line):
+        if ch == '"':
+            in_str = not in_str
+        elif ch == "'" and not in_str:
+            return line[:i]
+    return line
 
-    has_trailing_exit = bool(EXIT_PROC_RE.match(last_code_line))
 
-    # بناء الكود المحقون بصيغة ASCII نظيفة
-    new_proc = []
-    new_proc.extend(proc_lines[:header_end_idx + 1])
-    new_proc.append(f"{body_indent}On Error GoTo ErrHandler{newline}")
-    new_proc.extend(proc_lines[header_end_idx + 1:-1])
+# أسماء ثوابت تختلف بين الموديلات لنفس القيمة (Source02)
+ALIASES = {r"\bSRC_FOLDER\b": "SOURCE_FOLDER_NAME"}
 
-    if not has_trailing_exit:
-        new_proc.append(f"{body_indent}Exit {proc_type}{newline}")
-    new_proc.append(f"{base_indent}ErrHandler:{newline}")
-    new_proc.append(f"{body_indent}Err.Clear{newline}")
-    new_proc.append(proc_lines[-1])
 
-    return new_proc, True
+def normalise(proc_text):
+    """يطبّع الإجراء: بلا تعليقات ولا أسطر فارغة ولا فروق مسافات/إزاحة."""
+    out = []
+    for line in proc_text.split("\n"):
+        code = re.sub(r"\s+", " ", strip_comment(line)).strip()
+        for pat, rep in ALIASES.items():
+            code = re.sub(pat, rep, code)
+        if code:
+            out.append(code)
+    return "\n".join(out)
 
-def inject_handlers_in_file(file_path):
-    lines, encoding = read_bas_file(file_path)
-    output_lines = []
-    current_proc_lines = []
-    in_proc = False
-    modified_count = 0
 
-    for line in lines:
-        if not in_proc:
-            start_match = PROC_START_RE.match(line)
-            # التأكد من أن السطر ليس دالة في سطر واحد تنتهي بـ End Sub في نفس السطر
-            if start_match and not re.search(r'\bEnd\s+(?:Sub|Function|Property)\b', line, re.IGNORECASE):
-                in_proc = True
-                current_proc_lines = [line]
-            else:
-                output_lines.append(line)
-        else:
-            current_proc_lines.append(line)
-            if PROC_END_RE.match(line):
-                processed_lines, changed = process_procedure(current_proc_lines)
-                output_lines.extend(processed_lines)
-                if changed:
-                    modified_count += 1
-                in_proc = False
-                current_proc_lines = []
+def module_name(text, path):
+    m = re.search(r'^Attribute VB_Name\s*=\s*"(\w+)"', text, re.M)
+    return m.group(1) if m else path
 
-    if in_proc:
-        output_lines.extend(current_proc_lines)
 
-    if modified_count > 0:
-        with open(file_path, 'w', encoding=encoding, newline='') as f:
-            f.writelines(output_lines)
+def main(argv):
+    paths = argv or sorted(glob.glob(DEFAULT_GLOB))
+    if not paths:
+        print("لا توجد ملفات .bas للفحص:", DEFAULT_GLOB)
+        return 2
+    mods = {}
+    for p in paths:
+        t = read(p)
+        n = module_name(t, p)
+        if n in EMBEDDED:
+            mods[n] = {k: normalise(v) for k, v in procedures(t).items() if k not in EXCLUDE}
+    if len(mods) < 2:
+        print("يلزم موديلان مضمَّنان على الأقل للمقارنة. وُجد:", sorted(mods))
+        return 2
 
-    return modified_count
+    holders = defaultdict(list)           # procedure name -> modules that define it
+    for n, procs in mods.items():
+        for p in procs:
+            holders[p].append(n)
+    engine = sorted(p for p, h in holders.items() if len(h) >= 2 and (p.startswith("Src") or len(h) == len(mods)))
+
+    bad = 0
+    for p in engine:
+        variants = defaultdict(list)
+        for n in holders[p]:
+            variants[mods[n][p]].append(n)
+        if len(variants) > 1:
+            bad += 1
+            print("✗ %-28s يختلف بين: %s" % (p, " | ".join(", ".join(v) for v in variants.values())))
+    print("\nالموديلات المفحوصة :", ", ".join(sorted(mods)))
+    print("إجراءات المحرك     : %d   المختلفة: %d" % (len(engine), bad))
+    return 1 if bad else 0
+
 
 if __name__ == "__main__":
-    bas_files = glob.glob("*.bas")
-    if not bas_files:
-        print("لم يتم العثور على أي ملفات .bas في المجلد الحالي.")
-    else:
-        for bas_file in bas_files:
-            count = inject_handlers_in_file(bas_file)
-            print(f"[OK] {bas_file}: تم حقن معالج الأخطاء في {count} إجراء/دالة.")
+    sys.exit(main(sys.argv[1:]))
