@@ -5,7 +5,7 @@ Option Explicit
 ' Module: modOrientationResults02
 ' Purpose:
 '   Export the final guidance results from the guidance workbook (the one kept in memory by
-'   modTransfer02; Term02Guidance.xlsx of the output folder when none is open) to a separate
+'   modTransfer02; the guidance workbook file of the output folder when none is open) to a separate
 '   workbook inside folder "معالجة بيانات الفصل 02" with sequential naming:
 '   OrientationResults02.xlsx, OrientationResults02_01.xlsx, OrientationResults02_02.xlsx, ...
 '
@@ -25,7 +25,6 @@ Private m_silent As Boolean
 Private m_lastReport As String
 Private m_lastOutputPath As String
 
-Private Const SOURCE_FILE As String = "Term02Guidance.xlsx"
 Private Const OUTPUT_BASE_NAME As String = "OrientationResults02"
 Private Const OUTPUT_EXT As String = ".xlsx"
 
@@ -665,8 +664,13 @@ End Sub
 ' ---------------------------------------------------------------------------
 ' Workbook and table helpers
 ' ---------------------------------------------------------------------------
+' File name of the guidance workbook (the name itself is defined once, in modTransfer02).
+Private Function SOURCE_FILE() As String
+    SOURCE_FILE = modTransfer02.GuidanceFileName() & ".xlsx"
+End Function
+
 ' The guidance workbook kept in memory by modTransfer02; when there is none (module run on its own),
-' Term02Guidance.xlsx of the output folder is opened read-only instead.
+' the guidance workbook file of the output folder is opened read-only instead.
 Private Function OpenGuidanceSource(ByRef openedHere As Boolean) As Workbook
     Dim wb As Workbook, p As String
     openedHere = False

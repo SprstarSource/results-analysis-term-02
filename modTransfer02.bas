@@ -349,7 +349,7 @@ Public Function GuidanceSavedPath() As String
     GuidanceSavedPath = m_guidanceSaved
 End Function
 
-' Saves the in-memory workbook as Term02Guidance[_NN].xlsx inside the output folder
+' Saves the in-memory workbook as <GuidanceFileName>[_NN].xlsx inside the output folder
 ' (folder created when missing; an existing file is never replaced). A second call
 ' in the same run simply saves the same file again.
 Public Function SaveGuidanceCopy() As String
@@ -381,13 +381,18 @@ Private Sub ReleaseGuidanceWorkbook()
     On Error GoTo 0
 End Sub
 
+' Base name of the guidance workbook file (defined once here; modOrientation02 reads it too)
+Public Function GuidanceFileName() As String
+    GuidanceFileName = Txt("645 62D 636 631 20 627 644 62A 648 62C 64A 647 20 627 644 62A 62F 631 64A 62C 64A 20 644 644 641 635 644 20 30 32")
+End Function
+
 Private Function NextGuidancePath(ByVal folderPath As String) As String
     Dim cand As String, seq As Long
     If Right$(folderPath, 1) <> Application.PathSeparator Then folderPath = folderPath & Application.PathSeparator
-    cand = "Term02Guidance.xlsx"
+    cand = GuidanceFileName() & ".xlsx"
     Do While FileExistsPath(folderPath & cand) Or WorkbookNameOpen(cand)
         seq = seq + 1
-        cand = "Term02Guidance_" & Format$(seq, "00") & ".xlsx"
+        cand = GuidanceFileName() & "_" & Format$(seq, "00") & ".xlsx"
     Loop
     NextGuidancePath = folderPath & cand
 End Function

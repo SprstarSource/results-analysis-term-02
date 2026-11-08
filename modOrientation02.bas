@@ -14,7 +14,6 @@ Private m_lastReport As String
 ' Science section column N is ignored; arts has no section column.
 ' ============================================================
 
-Private Const DST_FILE As String = "Term02Guidance.xlsx"
 Private Const DST_SHEET As String = "Data"
 Private Const DST_TABLE As String = "Data"
 Private Const FIRST_ROW As Long = 3
@@ -289,6 +288,7 @@ Private Function OrientArts(ByVal wb As Workbook) As String
         .Header = xlYes
         .Apply
     End With
+    NumberRows lo
     v = lo.DataBodyRange.Value2
     n = UBound(v, 1)
     ReDim output(1 To n, 1 To 1)
@@ -429,6 +429,8 @@ Private Function OrientScience(ByVal wbDst As Workbook) As String
         .Header = xlYes
         .Apply
     End With
+
+    NumberRows lo
 
     Set body = lo.DataBodyRange
     v = body.Value2
@@ -1007,8 +1009,13 @@ Private Function OutputFolderName() As String
     OutputFolderName = Txt("645 639 627 644 62C 629 20 628 64A 627 646 627 62A 20 627 644 641 635 644 20 30 32")
 End Function
 
+' File name of the guidance workbook (the name itself is defined once, in modTransfer02).
+Private Function DST_FILE() As String
+    DST_FILE = modTransfer02.GuidanceFileName() & ".xlsx"
+End Function
+
 ' The guidance workbook kept in memory by modTransfer02; when there is none (module run on its own),
-' Term02Guidance.xlsx of the output folder is opened instead.
+' the guidance workbook file of the output folder is opened instead.
 Private Function OpenGuidance(ByRef opened As Boolean) As Workbook
     Dim wb As Workbook, p As String
     opened = False
@@ -1373,6 +1380,18 @@ Private Sub InvalidateOrientation(ByVal wb As Workbook, ByVal ws As Worksheet)
     lastRow = ws.Cells(ws.Rows.Count, decisionCol).End(xlUp).Row
     If lastRow >= 3 Then ws.Range(ws.Cells(3, decisionCol), ws.Cells(lastRow, decisionCol)).ClearContents
     If Not report Is Nothing Then report.Calculate
+End Sub
+
+' Column A (number): 1..n in the order of the table, which is already sorted by term average (descending).
+Private Sub NumberRows(ByVal lo As ListObject)
+    Dim n As Long, i As Long, nums() As Variant
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+    n = lo.DataBodyRange.Rows.Count
+    ReDim nums(1 To n, 1 To 1)
+    For i = 1 To n
+        nums(i, 1) = i
+    Next i
+    lo.ListColumns(1).DataBodyRange.Value2 = nums
 End Sub
 
 Private Function ColumnLetter(ByVal n As Long) As String
