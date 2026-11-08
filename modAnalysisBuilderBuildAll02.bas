@@ -1,19 +1,22 @@
-Attribute VB_Name = "modBiuldAnalysisfilesBuildAll02"
+Attribute VB_Name = "modAnalysisBuilderBuildAll02"
 Option Explicit
 
 '==============================================================================
-' Module  : modBiuldAnalysisfilesBuildAll02
+' Module  : modAnalysisBuilderBuildAll02
 ' Purpose : ONE macro (Build_All) that creates all the Term 02 analysis files.
 '           It is the action of the button "Second Term Analysis" of ControlPanel.
 '
 '   Build_All
-'    |- modBiuldAnalysisfilesData02      -> Data       (collects \Source02\ and groups the sections as in the old Map)
-'    |- modBiuldAnalysisfilesAnalysis02  -> Analysis01 / Analysis02
-'    |- modBiuldAnalysisfilesCompare02   -> Compare    (term 1 against term 2)
-'    |- modBiuldAnalysisfilesCartTec02   -> Cart_Tec
+'    |- modAnalysisBuilderData02      -> Data       (collects \Source02\ and groups the sections as in the old Map)
+'    |- modAnalysisBuilderAnalysis02  -> Analysis01 / Analysis02
+'    |- modAnalysisBuilderCompare02   -> Compare    (term 1 against term 2)
+'    |- modAnalysisBuilderCartTec02   -> Cart_Tec
 '
 ' Needs   : only the raw source files in \Source02\ (no Term02Results file, no previous button).
 ' Output  : \<output folder>\<file>.xlsx next to the tool (names of the old Map).
+'           Output folder = the Arabic name "Data processing of Term 02" (hex code points in
+'           baf_OutputFolderName, modAnalysisBuilderCommon02); it is created when it does not exist.
+'           Every file written by this package (workbooks and BuildLog) goes there.
 '           Nothing that already exists is replaced: a new run writes <file>_01.xlsx,
 '           <file>_02.xlsx ... so the typed notes / pictures of earlier files are safe.
 ' Source  : \Source02\ is only read (never converted, moved or changed).
