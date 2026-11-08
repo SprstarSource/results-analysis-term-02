@@ -1,8 +1,8 @@
-Attribute VB_Name = "modBiuldAnalysisfilesCartTec02"
+Attribute VB_Name = "modAnalysisBuilderCartTec02"
 Option Explicit
 
 '==============================================================================
-' Module  : modBiuldAnalysisfilesCartTec02   (Build_CartTec)
+' Module  : modAnalysisBuilderCartTec02   (Build_CartTec)
 ' Purpose : Adds the Cart_Tec sheet (one pupil card) to a workbook that already
 '           has the Data sheet. Designed for a projector (DataShow).
 ' Design  : - I1 = record number, linked to a spinner placed over I1.

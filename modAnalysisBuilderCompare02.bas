@@ -1,8 +1,8 @@
-Attribute VB_Name = "modBiuldAnalysisfilesCompare02"
+Attribute VB_Name = "modAnalysisBuilderCompare02"
 Option Explicit
 
 '==============================================================================
-' Module  : modBiuldAnalysisfilesCompare02
+' Module  : modAnalysisBuilderCompare02
 ' Purpose : Adds the Compare sheet: term 1 against term 2, for the data of the FIRST
 '           table of the Analysis sheets only (per subject + the "passed" cells).
 ' Design  : - One header for rows and columns (the subjects), then every item in two rows:

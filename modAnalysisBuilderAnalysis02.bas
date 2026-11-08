@@ -1,8 +1,8 @@
-Attribute VB_Name = "modBiuldAnalysisfilesAnalysis02"
+Attribute VB_Name = "modAnalysisBuilderAnalysis02"
 Option Explicit
 
 '==============================================================================
-' Module  : modBiuldAnalysisfilesAnalysis02
+' Module  : modAnalysisBuilderAnalysis02
 ' Purpose : Adds Analysis01 (term 1) and Analysis02 (term 2) to a workbook that
 '           already has the Data sheet. One block per section, one under another.
 ' Design  : - Everything is read from the Data table (structured references), so
@@ -392,8 +392,3 @@ Private Sub PutModeFormula(ByVal cel As Range, ByVal f As String)
     End If
     On Error GoTo 0
 End Sub
-
-
-
-
-
