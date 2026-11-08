@@ -133,7 +133,8 @@ Public Sub Run_Orientation02()
     If Not artsSheet Is Nothing Then msg = msg & vbLf & vbLf & OrientArts(wb) Else msg = msg & vbLf & "Data01: missing destination; skipped."
     BuildGeneralReport wb
     Application.Calculation = xlCalculationAutomatic
-    If opened Then
+    If modTransfer02.GuidanceWorkbook() Is Nothing Then
+        ' standalone run: the workbook was taken from the output folder, saved in place
         wb.Save
         savedPath = wb.FullName
     Else
