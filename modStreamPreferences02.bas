@@ -12,7 +12,10 @@ Private m_lastReport As String
 ' Strict 1-to-1 Matching Rules:
 ' 1. Exact 1-to-1 match with empty wish cell(s):
 '    -> Process CONTINUES, data is transferred, and empty wishes are reported.
-' 2. No match (unmatched row in the wishes file OR unmatched pupil in the guidance workbook)
+' 2. Wishes row whose NAME is not in the results at all (pupil left / absent from the tests):
+'    -> Row is IGNORED, listed in the report with the pupil name, process CONTINUES.
+' 3. No match (unmatched pupil in the guidance workbook, or a wishes row whose name is in the results
+'    but whose birth date differs)
 '    OR Multi-row match (duplicate/ambiguous rows in the wishes file OR in the guidance workbook)
 '    OR invalid birth dates / repeated non-empty wishes:
 '    -> Process STOPS (Preferences02Succeeded = False), target is not modified,
@@ -40,6 +43,7 @@ Private Type WishesBatch
     Matched As Long
     EmptyWishCount As Long
     UnmatchedSourceCount As Long
+    IgnoredSourceCount As Long
     UnmatchedTargetCount As Long
     MultiSourceCount As Long
     MultiTargetCount As Long
@@ -68,7 +72,7 @@ Public Sub Run_StreamPreferences02()
     Dim scienceTouched As Boolean, artsTouched As Boolean
     Dim wbW As Workbook, wbDst As Workbook, wOpened As Boolean, copyPath As String
     Dim science As WishesBatch, arts As WishesBatch
-    Dim stopIssues As Object, emptyNotes As Object
+    Dim stopIssues As Object, emptyNotes As Object, ignoredNotes As Object
     Dim ws As Worksheet, lo As ListObject, failed As Boolean, errText As String, msg As String
     Dim hasStop As Boolean, problem As String, wishPath As String
 
@@ -92,9 +96,10 @@ Public Sub Run_StreamPreferences02()
 
     Set stopIssues = CreateObject("Scripting.Dictionary")
     Set emptyNotes = CreateObject("Scripting.Dictionary")
+    Set ignoredNotes = CreateObject("Scripting.Dictionary")
 
-    PrepareWishes wbW, wbDst, False, science, stopIssues, emptyNotes
-    PrepareWishes wbW, wbDst, True, arts, stopIssues, emptyNotes
+    PrepareWishes wbW, wbDst, False, science, stopIssues, emptyNotes, ignoredNotes
+    PrepareWishes wbW, wbDst, True, arts, stopIssues, emptyNotes, ignoredNotes
 
     If Not science.TrackActive And Not arts.TrackActive Then
         Err.Raise vbObjectError + 84, , "No active student records found to match between the wishes file and the guidance workbook."
@@ -105,6 +110,9 @@ Public Sub Run_StreamPreferences02()
     msg = "Wishes file: " & Mid$(wishPath, InStrRev(wishPath, Application.PathSeparator) + 1) & vbLf & science.Message & vbLf & arts.Message
     If emptyNotes.Count > 0 Then
         msg = AppendDetailsList(emptyNotes, msg, "Matched rows with empty wishes (work continues): " & emptyNotes.Count)
+    End If
+    If ignoredNotes.Count > 0 Then
+        msg = AppendDetailsList(ignoredNotes, msg, "Wishes ignored - pupil not in the results (work continues): " & ignoredNotes.Count)
     End If
 
     If hasStop Then
@@ -163,7 +171,7 @@ Done:
         End If
     Else
         If Not wasSilent Then
-            MsgBox msg, IIf(emptyNotes.Count > 0, vbExclamation, vbInformation), "Stream preferences 02"
+            MsgBox msg, IIf(emptyNotes.Count > 0 Or ignoredNotes.Count > 0, vbExclamation, vbInformation), "Stream preferences 02"
         End If
     End If
     Exit Sub
@@ -180,7 +188,8 @@ EH:
 End Sub
 
 Private Sub PrepareWishes(ByVal wbW As Workbook, ByVal wbDst As Workbook, ByVal isArts As Boolean, _
-                          ByRef batch As WishesBatch, ByVal stopIssues As Object, ByVal emptyNotes As Object)
+                          ByRef batch As WishesBatch, ByVal stopIssues As Object, ByVal emptyNotes As Object, _
+                          ByVal ignoredNotes As Object)
     Dim wsW As Worksheet, wsDst As Worksheet, lo As ListObject, body As Range
     Dim sourceSheet As String, targetSheet As String, wishColumn As Long, width As Long
     Dim tv As Variant, wv As Variant, wishOut As Variant, writeRows() As Boolean
@@ -412,10 +421,10 @@ Private Sub PrepareWishes(ByVal wbW As Workbook, ByVal wbDst As Workbook, ByVal 
             rowT = 0
 
             If Not dNameCnt.Exists(nk) Then
-                ' No match in target
-                batch.UnmatchedSourceCount = batch.UnmatchedSourceCount + 1
-                batch.HasFatalStop = True
-                AddValidationIssue stopIssues, location, "UNMATCHED_SRC(" & CStr(wv(r, W_COL_NAME)) & ")"
+                ' Name not in the results at all (pupil left / absent from the tests): no effect on the
+                ' orientation. The row is ignored (nothing written), listed in the report; work continues.
+                batch.IgnoredSourceCount = batch.IgnoredSourceCount + 1
+                AddValidationIssue ignoredNotes, location, CStr(wv(r, W_COL_NAME)) & " (not in the results - ignored)"
                 sourceOKRows(r) = False
             ElseIf Len(dk) > 0 Then
                 fk = nk & "|" & dk
@@ -526,12 +535,14 @@ Private Sub PrepareWishes(ByVal wbW As Workbook, ByVal wbDst As Workbook, ByVal 
     If batch.HasFatalStop Then
         batch.Message = targetSheet & ": STOPPED (matched: " & batch.Matched & _
                         ", unmatched in wishes: " & batch.UnmatchedSourceCount & _
+                        ", ignored in wishes: " & batch.IgnoredSourceCount & _
                         ", unmatched in target: " & batch.UnmatchedTargetCount & _
                         ", multi-match in wishes: " & batch.MultiSourceCount & _
                         ", multi-match in target: " & batch.MultiTargetCount & ")."
     Else
         batch.Message = targetSheet & ": 100% matched (" & batch.Matched & " pupil(s) transferred" & _
-                        "; empty wish cells: " & batch.EmptyWishCount & ")."
+                        "; empty wish cells: " & batch.EmptyWishCount & _
+                        "; ignored in wishes file: " & batch.IgnoredSourceCount & ")."
     End If
 End Sub
 
