@@ -4,16 +4,20 @@ Option Explicit
 '==============================================================================
 ' modExamenAnalysis02  -  unified module (second semester)
 '   1) reads every .xlsx in the folder  ExamenSource02  (next to this workbook)
-'   2) consolidates marks per class  (Philo, LEtr, SE01, SE02, Math, GEc)
-'   3) builds a NEW workbook:  Gen + 6 class sheets + data-transfer summary
-'      - semester average computed here (coefficients per class)
+'      (the sheet named Worksheet - any letter case - is ignored in every file)
+'   2) classifies every class by LEVEL (first / second / third year, read from the
+'      cohort name in A5) and consolidates marks per class:
+'        third and second year : Philo, LEtr, SE01, SE02, Math, GEc
+'        first year (common core): Lit, ST01, ST02, ST03, ST04
+'   3) builds ONE NEW workbook PER LEVEL that has data (a level without data is skipped):
+'        Gen + one sheet per class that has data + data-transfer summary
+'      - semester average computed here (coefficients per level and class)
 '      - class tables sorted by average (descending), analysis tables below
-'      - analysis cells are fixed values (no formulas) except the live cells of Gen:
-'        the "difference" column of section 3 and two hidden helper columns (H:I)
-'        of section 4, which drive the conditional formatting (manual input)
-'   4) saves it in the output folder next to this workbook (created when missing):
-'      <Arabic name> .xlsx / _01 / _02 ...
-' Subject recognition: exact keywords first; if none matches, a one-wrong-letter
+'      - analysis cells are fixed values, except the live cells of Gen (third year only)
+'      Gen of first / second year: sections 1-2.  Gen of third year: 1-2 + 3 (semester 1 vs 2) + 4 (last five seasons).
+'   4) saves each file in the output folder next to this workbook (created when missing):
+'        <Arabic name of the level> .xlsx / _01 / _02 ...   (name: OutputFolderName / Ar("out_nameN"))
+'   Subject recognition: exact keywords first; if none matches, a one-wrong-letter
 '   fallback (unique subject only) - every such guess is written in the transfer sheet.
 ' All Arabic text is stored as hex code points (ArHex) so this file is pure ASCII.
 '==============================================================================
@@ -22,12 +26,14 @@ Option Explicit
 Private Const SOURCE_FOLDER_NAME As String = "ExamenSource02"
 Private Const SRC_HEADER_ROW As Long = 8
 Private Const DATA_START_ROW As Long = 9
-Private Const MAX_STUDENTS As Long = 200
+Private Const MAX_STUDENTS As Long = 60
+Private Const NCOH As Long = 17          ' classes: 1..6 third year, 7..12 second year, 13..17 first year
+Private Const MAX_SUBJ As Long = 14      ' subjects per class (the largest class uses 12)
 Private Const MARK_OFFSET As Long = 0
 Private Const ABSENT_IF_NO_TEST_COLUMN As Boolean = False
 Private Const BLOCK_ON_ROSTER_MISMATCH As Boolean = True
 Private Const PASS_MARK As Double = 10
-Private Const SEASON_START_MONTH As Long = 9
+Private Const SEASON_START_MONTH As Long = 9   ' season = September .. August (third-year past-seasons table)
 
 ' ---------------- layout (same values as modBacEtab / modBacAnalysis) ----------------
 Private Const TITLE_ROW As Long = 1
@@ -92,26 +98,27 @@ Private g_SubjectDisplay As Object
 Private g_Seen As Object
 
 Private mExemptKey As String
-Private mN(1 To 6) As Long
-Private mRoster(1 To 6) As String
-Private mReg(1 To 6) As Long
-Private mPres(1 To 6) As Long
-Private mPass(1 To 6) As Long
-Private mExempt(1 To 6) As Long
-Private mNames(1 To 6, 1 To MAX_STUDENTS) As Variant
-Private mBirth(1 To 6, 1 To MAX_STUDENTS) As Variant
-Private mMarks(1 To 6, 1 To MAX_STUDENTS, 1 To 12) As Variant
-Private mLoaded(1 To 6, 1 To 12) As Boolean
+Private mN(1 To NCOH) As Long
+Private mRoster(1 To NCOH) As String
+Private mReg(1 To NCOH) As Long
+Private mPres(1 To NCOH) As Long
+Private mPass(1 To NCOH) As Long
+Private mExempt(1 To NCOH) As Long
+Private mNames(1 To NCOH, 1 To MAX_STUDENTS) As Variant
+Private mBirth(1 To NCOH, 1 To MAX_STUDENTS) As Variant
+Private mMarks(1 To NCOH, 1 To MAX_STUDENTS, 1 To MAX_SUBJ) As Variant
+Private mLoaded(1 To NCOH, 1 To MAX_SUBJ) As Boolean
 
 '==============================================================================
 '  Entry point
 '==============================================================================
 Public Sub Run_ExamenAnalysis02()
-    Dim baseFolder As String, sourceFolder As String, outDir As String, outputPath As String
+    Dim baseFolder As String, sourceFolder As String, outputPath As String
     Dim dictSummary As Object
     Dim oldScreen As Boolean, oldEvents As Boolean, oldAlerts As Boolean, oldStatus As Variant
     Dim stateSaved As Boolean, Failed As Boolean, savedOK As Boolean
     Dim errText As String, msg As String, s As Long, sheetsMade As Long
+    Dim lv As Long, outList As String, filesMade As Long, outDir As String
 
     On Error GoTo Failed
     oldScreen = Application.ScreenUpdating
@@ -138,16 +145,31 @@ Public Sub Run_ExamenAnalysis02()
     ConsolidateSources sourceFolder, dictSummary
     CheckCoverage
 
-    Application.StatusBar = Ar("working") & " ..."
-    BuildOutputWorkbook dictSummary
+    ' one workbook per level; a level without any data produces no file
+    For lv = 1 To 3
+        If LevelHasData(lv) Then
+            Application.StatusBar = Ar("working") & " " & Ar("lv" & CStr(lv)) & " ..."
+            savedOK = False
+            BuildOutputWorkbook dictSummary, lv
 
-    outDir = baseFolder & Application.PathSeparator & OutputFolderName()
-    If Not EnsureFolder(outDir) Then Err.Raise vbObjectError + 904, "modExamenAnalysis02", "The output folder could not be created: " & outDir
-    outputPath = NewOutputPath(outDir, Ar("out_name"))
-    g_wbOut.CheckCompatibility = False
-    g_wbOut.SaveAs fileName:=outputPath, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False
-    savedOK = True
-    sheetsMade = g_wbOut.Worksheets.Count
+            If Len(outDir) = 0 Then
+                outDir = baseFolder & Application.PathSeparator & OutputFolderName()
+                If Not EnsureFolder(outDir) Then
+                    Err.Raise vbObjectError + 905, "modExamenAnalysis02", Ar("no_out_folder") & vbLf & outDir
+                End If
+            End If
+            outputPath = NewOutputPath(outDir, Ar("out_name" & CStr(lv)))
+            g_wbOut.CheckCompatibility = False
+            g_wbOut.SaveAs fileName:=outputPath, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False
+            savedOK = True
+            filesMade = filesMade + 1
+            sheetsMade = sheetsMade + g_wbOut.Worksheets.Count
+            outList = outList & vbLf & outputPath
+        End If
+    Next lv
+    If filesMade = 0 Then
+        Err.Raise vbObjectError + 904, "modExamenAnalysis02", Ar("no_valid") & vbLf & Left$(g_OpenFailures & g_ModelFailures, 600)
+    End If
 
 Finished:
     On Error Resume Next
@@ -163,11 +185,12 @@ Finished:
     On Error GoTo 0
 
     If Failed Then
+        If Len(outList) > 0 Then errText = errText & vbLf & vbLf & Ar("saved_before") & outList
         MsgBox Ar("failed") & vbLf & errText, vbCritical + vbMsgBoxRight + vbMsgBoxRtlReading, Ar("app_title2")
     Else
-        msg = Ar("done") & vbLf & outputPath & vbLf & vbLf & Ar("sheets") & " : " & sheetsMade
-        For s = 1 To 6
-            msg = msg & vbLf & SheetName(s) & " : " & mReg(s) & " / " & mPres(s)
+        msg = Ar("done") & outList & vbLf & vbLf & Ar("sheets") & " : " & sheetsMade
+        For s = 1 To NCOH
+            If mN(s) > 0 Then msg = msg & vbLf & CStr(LevelOf(s)) & SheetName(s) & " : " & mReg(s) & " / " & mPres(s)
         Next s
         If mFontNotes <> "" Then msg = msg & vbLf & vbLf & Ar("fonts") & mFontNotes
         If mLayoutNotes <> "" Then msg = msg & vbLf & vbLf & Ar("layout_warn") & mLayoutNotes
@@ -207,7 +230,7 @@ Private Sub InitState()
     Erase mBirth
     Erase mMarks
     Erase mLoaded
-    For s = 1 To 6
+    For s = 1 To NCOH
         mN(s) = 0: mRoster(s) = ""
         mReg(s) = 0: mPres(s) = 0: mPass(s) = 0: mExempt(s) = 0
     Next s
@@ -218,28 +241,119 @@ End Sub
 '  Class / subject definitions (order, coefficients, headers)
 '  subject ids: 1 Arabic, 2 Philosophy, 3 Hist-Geo, 4 Islamic, 5 French, 6 English,
 '  7 3rd language, 8 Math, 9 Physics, 10 Natural sciences, 11 Accounting,
-'  12 Economy, 13 Law, 14 Physical education
+'  12 Economy, 13 Law, 14 Physical education, 15 Art education, 16 Informatics,
+'  17 Technology
 '==============================================================================
-Private Function SheetName(ByVal s As Long) As String
-    SheetName = Choose(s, "Philo", "LEtr", "SE01", "SE02", "Math", "GEc")
+' ---- level / stream helpers -------------------------------------------------
+'  class index s : 1..6 third year, 7..12 second year, 13..17 first year
+'  streams (second / third year) : 1 Philo, 2 LEtr, 3 SE01, 4 SE02, 5 Math, 6 GEc
+'  streams (first year)          : 1 Lit, 2 ST01, 3 ST02, 4 ST03, 5 ST04
+Private Function LevelOf(ByVal s As Long) As Long
+    If s <= 6 Then
+        LevelOf = 3
+    ElseIf s <= 12 Then
+        LevelOf = 2
+    Else
+        LevelOf = 1
+    End If
 End Function
 
+Private Function StreamOf(ByVal s As Long) As Long
+    Select Case LevelOf(s)
+        Case 3: StreamOf = s
+        Case 2: StreamOf = s - 6
+        Case Else: StreamOf = s - 12
+    End Select
+End Function
+
+Private Function CohortIndex(ByVal level As Long, ByVal stream As Long) As Long
+    Select Case level
+        Case 3: CohortIndex = stream
+        Case 2: CohortIndex = 6 + stream
+        Case 1: CohortIndex = 12 + stream
+    End Select
+End Function
+
+Private Function LevelHasData(ByVal level As Long) As Boolean
+    Dim s As Long
+    For s = 1 To NCOH
+        If LevelOf(s) = level And mN(s) > 0 Then LevelHasData = True: Exit Function
+    Next s
+End Function
+
+' level (1/2/3) from a cohort name that went through SmartClean; 0 = unknown
+Private Function LevelOfName(ByVal c As String) As Long
+    If InStr(c, Ar("k_third")) > 0 Then
+        LevelOfName = 3
+    ElseIf InStr(c, Ar("k_second")) > 0 Then
+        LevelOfName = 2
+    ElseIf InStr(c, Ar("k_first")) > 0 Then
+        LevelOfName = 1
+    End If
+End Function
+
+Private Function TitleMain(ByVal s As Long) As String
+    TitleMain = Ar("title_base") & " " & Ar("lv" & CStr(LevelOf(s)))
+End Function
+
+Private Function SheetName(ByVal s As Long) As String
+    If LevelOf(s) = 1 Then
+        SheetName = Choose(StreamOf(s), "Lit", "ST01", "ST02", "ST03", "ST04")
+    Else
+        SheetName = Choose(StreamOf(s), "Philo", "LEtr", "SE01", "SE02", "Math", "GEc")
+    End If
+End Function
+
+' subject ids per class, in column order (coefficients below, same order)
+'  coefficients: ministerial table (hours and coefficients, second / third year and first year);
+'  Amazigh is not transferred (ignored subject), as before.
 Private Function SheetIds(ByVal s As Long) As Variant
-    Select Case s
-        Case 1: SheetIds = Array(1, 2, 3, 4, 5, 6, 8, 14)
-        Case 2: SheetIds = Array(1, 2, 3, 4, 5, 6, 7, 8, 14)
-        Case 3, 4, 5: SheetIds = Array(1, 8, 9, 10, 4, 3, 5, 6, 2, 14)
-        Case 6: SheetIds = Array(1, 8, 11, 12, 13, 4, 3, 5, 6, 2, 14)
+    Select Case LevelOf(s)
+        Case 3
+            Select Case StreamOf(s)
+                Case 1: SheetIds = Array(1, 2, 3, 4, 5, 6, 8, 14)
+                Case 2: SheetIds = Array(1, 2, 3, 4, 5, 6, 7, 8, 14)
+                Case 3, 4, 5: SheetIds = Array(1, 8, 9, 10, 4, 3, 5, 6, 2, 14)
+                Case 6: SheetIds = Array(1, 8, 11, 12, 13, 4, 3, 5, 6, 2, 14)
+            End Select
+        Case 2
+            Select Case StreamOf(s)
+                Case 1: SheetIds = Array(1, 2, 3, 4, 5, 6, 8, 9, 10, 14, 15)
+                Case 2: SheetIds = Array(1, 3, 4, 5, 6, 7, 8, 14, 15)
+                Case 3, 4, 5: SheetIds = Array(1, 8, 9, 10, 4, 3, 5, 6, 14, 15)
+                Case 6: SheetIds = Array(1, 8, 11, 12, 13, 4, 3, 5, 6, 14, 15)
+            End Select
+        Case 1
+            Select Case StreamOf(s)
+                Case 1: SheetIds = Array(1, 5, 6, 3, 4, 8, 9, 10, 16, 14, 15)
+                Case Else: SheetIds = Array(1, 8, 9, 10, 5, 6, 3, 4, 16, 17, 14, 15)
+            End Select
     End Select
 End Function
 
 Private Function SheetCoefs(ByVal s As Long) As Variant
-    Select Case s
-        Case 1: SheetCoefs = Array(6, 6, 4, 2, 3, 3, 2, 1)
-        Case 2: SheetCoefs = Array(5, 2, 2, 2, 5, 5, 4, 2, 1)
-        Case 3, 4: SheetCoefs = Array(3, 5, 5, 6, 2, 2, 2, 2, 2, 1)
-        Case 5: SheetCoefs = Array(3, 7, 6, 2, 2, 2, 2, 2, 2, 1)
-        Case 6: SheetCoefs = Array(3, 5, 6, 5, 2, 2, 4, 2, 2, 2, 1)
+    Select Case LevelOf(s)
+        Case 3
+            Select Case StreamOf(s)
+                Case 1: SheetCoefs = Array(6, 6, 4, 2, 3, 3, 2, 1)
+                Case 2: SheetCoefs = Array(5, 2, 2, 2, 5, 5, 4, 2, 1)
+                Case 3, 4: SheetCoefs = Array(3, 5, 5, 6, 2, 2, 2, 2, 2, 1)
+                Case 5: SheetCoefs = Array(3, 7, 6, 2, 2, 2, 2, 2, 2, 1)
+                Case 6: SheetCoefs = Array(3, 5, 6, 5, 2, 2, 4, 2, 2, 2, 1)
+            End Select
+        Case 2
+            Select Case StreamOf(s)
+                Case 1: SheetCoefs = Array(5, 5, 4, 2, 3, 3, 2, 2, 2, 1, 1)
+                Case 2: SheetCoefs = Array(4, 4, 2, 4, 4, 4, 2, 1, 1)
+                Case 3, 4: SheetCoefs = Array(2, 5, 5, 6, 2, 2, 2, 2, 1, 1)
+                Case 5: SheetCoefs = Array(2, 7, 6, 2, 2, 2, 2, 2, 1, 1)
+                Case 6: SheetCoefs = Array(2, 3, 5, 4, 2, 2, 3, 2, 2, 1, 1)
+            End Select
+        Case 1
+            Select Case StreamOf(s)
+                Case 1: SheetCoefs = Array(5, 3, 3, 3, 2, 2, 2, 2, 2, 1, 1)
+                Case Else: SheetCoefs = Array(3, 5, 4, 4, 2, 2, 2, 2, 2, 2, 1, 1)
+            End Select
     End Select
 End Function
 
@@ -272,6 +386,9 @@ Private Function SubjectIdOf(ByVal key As String) As Long
     If InStr(key, Ar("k_acc")) > 0 Then SubjectIdOf = 11: Exit Function
     If InStr(key, Ar("k_eco")) > 0 Then SubjectIdOf = 12: Exit Function
     If InStr(key, Ar("k_law")) > 0 Then SubjectIdOf = 13: Exit Function
+    If InStr(key, Ar("k_art")) > 0 Or InStr(key, Ar("k_art2")) > 0 Then SubjectIdOf = 15: Exit Function
+    If InStr(key, Ar("k_tech")) > 0 Then SubjectIdOf = 17: Exit Function
+    If InStr(key, Ar("k_inf")) > 0 Or InStr(key, Ar("k_inf2")) > 0 Then SubjectIdOf = 16: Exit Function
     If InStr(key, Ar("k_math")) > 0 Then SubjectIdOf = 8: Exit Function
 End Function
 
@@ -339,13 +456,14 @@ Private Sub ConsolidateSources(ByVal sourceFolder As String, ByVal dictSummary A
     Dim files As Collection
     Dim wsSource As Worksheet
     Dim i As Long
+    Dim fso As Object, fil As Object
 
+    ' FileSystemObject: Unicode-safe (Dir is ANSI and garbles Arabic file names)
     Set files = New Collection
-    fileName = Dir(sourceFolder & "*.xlsx")
-    Do While fileName <> ""
-        If Left$(fileName, 2) <> "~$" Then files.Add fileName
-        fileName = Dir()
-    Loop
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    For Each fil In fso.GetFolder(sourceFolder).Files
+        If LCase$(fso.GetExtensionName(fil.Name)) = "xlsx" And Left$(fil.Name, 2) <> "~$" Then files.Add CStr(fil.Name)
+    Next fil
 
     If files.Count = 0 Then
         Err.Raise vbObjectError + 903, "modExamenAnalysis02", Ar("no_files") & vbLf & sourceFolder
@@ -363,7 +481,7 @@ Private Sub ConsolidateSources(ByVal sourceFolder As String, ByVal dictSummary A
                 g_OpenFailures = g_OpenFailures & "  >> " & fileName & vbCrLf
             Else
                 For Each wsSource In g_wbSource.Worksheets
-                    If wsSource.Name <> "Worksheet" Then
+                    If StrComp(wsSource.Name, "Worksheet", vbTextCompare) <> 0 Then
                         ProcessSheet wsSource, dictSummary, fileName
                     End If
                 Next wsSource
@@ -551,23 +669,43 @@ Private Sub UpdateCohortCount(ByVal cohortName As String, ByVal studentCount As 
     End If
 End Sub
 
-' cohort name -> sheet index (0 = not mapped)
+' cohort name -> class index (0 = not mapped).  Level first, then stream.
 Private Function ResolveTarget(ByVal cohortName As String) As Long
-    Dim c As String
+    Dim c As String, lv As Long, st As Long
     c = SmartClean(cohortName)
-    If InStr(c, Ar("k_third")) = 0 Then Exit Function
+    lv = LevelOfName(c)
+    If lv = 0 Then Exit Function
 
-    If InStr(c, Ar("k_adab")) > 0 Then ResolveTarget = 1: Exit Function
-    If InStr(c, Ar("k_lughat")) > 0 And InStr(c, Ar("k_alman")) > 0 Then ResolveTarget = 2: Exit Function
-    If InStr(c, Ar("k_ulum")) > 0 And InStr(c, Ar("k_tajrib")) > 0 Then
-        Select Case LastDigit(c)
-            Case "1": ResolveTarget = 3
-            Case "2": ResolveTarget = 4
-        End Select
-        Exit Function
+    If lv = 1 Then
+        ' first year (common core): literature, or science and technology 1..4
+        If InStr(c, Ar("k_adab")) > 0 Then
+            st = 1
+        ElseIf InStr(c, Ar("k_ulum")) > 0 Then
+            Select Case LastDigit(c)
+                Case "1": st = 2
+                Case "2": st = 3
+                Case "3": st = 4
+                Case "4": st = 5
+            End Select
+        End If
+    Else
+        ' second and third year share the same streams
+        If InStr(c, Ar("k_adab")) > 0 Then
+            st = 1
+        ElseIf InStr(c, Ar("k_lughat")) > 0 And InStr(c, Ar("k_alman")) > 0 Then
+            st = 2
+        ElseIf InStr(c, Ar("k_ulum")) > 0 And InStr(c, Ar("k_tajrib")) > 0 Then
+            Select Case LastDigit(c)
+                Case "1": st = 3
+                Case "2": st = 4
+            End Select
+        ElseIf InStr(c, Ar("k_riyad")) > 0 Then
+            st = 5
+        ElseIf InStr(c, Ar("k_tasyir")) > 0 Then
+            st = 6
+        End If
     End If
-    If InStr(c, Ar("k_riyad")) > 0 Then ResolveTarget = 5: Exit Function
-    If InStr(c, Ar("k_tasyir")) > 0 Then ResolveTarget = 6: Exit Function
+    If st > 0 Then ResolveTarget = CohortIndex(lv, st)
 End Function
 
 Private Function LastDigit(ByVal s As String) As String
@@ -682,9 +820,11 @@ End Function
 
 Private Sub CheckCoverage()
     Dim s As Long, j As Long, ids As Variant, miss As String, txt As String
-    For s = 1 To 6
-        If mN(s) = 0 Then
-            txt = txt & "  >> " & SheetName(s) & " : " & Ar("n_nodata") & vbCrLf
+    For s = 1 To NCOH
+        If Not LevelHasData(LevelOf(s)) Then
+            ' level without any data: nothing is produced, nothing to report
+        ElseIf mN(s) = 0 Then
+            txt = txt & "  >> " & CStr(LevelOf(s)) & SheetName(s) & " : " & Ar("n_nodata") & vbCrLf
         Else
             ids = SheetIds(s)
             miss = ""
@@ -694,7 +834,7 @@ Private Sub CheckCoverage()
                     miss = miss & SubjHeader(CLng(ids(j - 1)))
                 End If
             Next j
-            If miss <> "" Then txt = txt & "  >> " & SheetName(s) & " : " & miss & vbCrLf
+            If miss <> "" Then txt = txt & "  >> " & CStr(LevelOf(s)) & SheetName(s) & " : " & miss & vbCrLf
         End If
     Next s
     If txt <> "" Then g_Notes = Ar("n_missing") & vbCrLf & txt
@@ -786,7 +926,7 @@ End Function
 '==============================================================================
 '  PART 2 : build the output workbook
 '==============================================================================
-Private Sub BuildOutputWorkbook(ByVal dictSummary As Object)
+Private Sub BuildOutputWorkbook(ByVal dictSummary As Object, ByVal level As Long)
     Dim ws As Worksheet, wsGen As Worksheet, wsSum As Worksheet
     Dim s As Long, nCols As Long
 
@@ -794,18 +934,21 @@ Private Sub BuildOutputWorkbook(ByVal dictSummary As Object)
     Set wsGen = g_wbOut.Worksheets(1)
     ResolveFonts wsGen
 
-    For s = 1 To 6
-        Application.StatusBar = Ar("working") & " " & SheetName(s)
-        Set ws = g_wbOut.Worksheets.Add(After:=g_wbOut.Worksheets(g_wbOut.Worksheets.Count))
-        BuildSeriesSheet ws, s
-        nCols = LastDataCol(ws)
-        ApplyLayout ws, nCols
-        mLayoutNotes = mLayoutNotes & CheckLayout(ws, nCols)
+    ' only the classes of this level that have data get a sheet
+    For s = 1 To NCOH
+        If LevelOf(s) = level And mN(s) > 0 Then
+            Application.StatusBar = Ar("working") & " " & CStr(level) & SheetName(s)
+            Set ws = g_wbOut.Worksheets.Add(After:=g_wbOut.Worksheets(g_wbOut.Worksheets.Count))
+            BuildSeriesSheet ws, s
+            nCols = LastDataCol(ws)
+            ApplyLayout ws, nCols
+            mLayoutNotes = mLayoutNotes & CheckLayout(ws, nCols)
+        End If
     Next s
 
     Set wsSum = g_wbOut.Worksheets.Add(After:=g_wbOut.Worksheets(g_wbOut.Worksheets.Count))
-    WriteSummarySheet wsSum, dictSummary
-    BuildGen wsGen
+    WriteSummarySheet wsSum, dictSummary, level
+    BuildGen wsGen, level
 
     On Error Resume Next
     wsGen.Activate
@@ -1103,7 +1246,7 @@ Private Sub BuildSeriesSheet(ByVal ws As Worksheet, ByVal s As Long)
 
     ' ---------- row 1 : title + counters ----------
     ws.Rows(TITLE_ROW).RowHeight = TITLE_ROW_HEIGHT
-    MergeText ws, TITLE_ROW, 1, nCols - 6, Ar("title_main2") & " " & SeriesBranch(s)
+    MergeText ws, TITLE_ROW, 1, nCols - 6, TitleMain(s) & " " & SeriesBranch(s)
     StyleBanner ws.Range(ws.Cells(TITLE_ROW, 1), ws.Cells(TITLE_ROW, nCols - 6))
     PutStripCell ws, TITLE_ROW, nCols - 5, nCols - 4, Ar("s_count"), nCols - 3, mReg(s)
     PutStripCell ws, TITLE_ROW, nCols - 2, nCols - 1, Ar("s_exempt"), nCols, mExempt(s)
@@ -1379,133 +1522,43 @@ Private Sub PutRate(ByVal g As Worksheet, ByVal r As Long, ByVal c As Long, ByVa
     If pres > 0 Then g.Cells(r, c).Value2 = pass / pres
 End Sub
 
-Private Sub BuildGen(ByVal g As Worksheet)
-    Dim ord As Variant
-    Dim tit(1 To 4) As Long, hd(1 To 4) As Long, fr(1 To 4) As Long, lr(1 To 4) As Long, tt(1 To 4) As Long
+' ---------------------------------------------------------------------------
+'  Third year only: last five seasons (past seasons typed by hand; the last
+'  column is filled from this file).  Returns the row of the total line.
+' ---------------------------------------------------------------------------
+Private Function SeasonsSection(ByVal g As Worksheet, ByRef ord() As Long, ByVal nb As Long, _
+                                ByVal r0 As Long, ByVal titleKey As String, _
+                                ByVal tPass As Long, ByVal tPres As Long) As Long
+    Dim hd As Long, fr As Long, lr As Long, tt As Long
     Dim k As Long, s As Long, r As Long, j As Long, y As Long, yearStart As Long
-    Dim tReg As Long, tPres As Long, tPass As Long
 
-    ord = Array(1, 2, 5, 3, 4, 6)
-    g.Name = "Gen"
-    g.DisplayRightToLeft = True
-    g.Cells.Font.Name = mFontBase
-    g.Cells.Font.Size = 14
-    g.Cells.VerticalAlignment = xlCenter
-    g.Columns("A").ColumnWidth = 30
-    g.Columns("B:J").ColumnWidth = 15
-
-    For k = 0 To 5
-        s = CLng(ord(k))
-        tReg = tReg + mReg(s)
-        tPres = tPres + mPres(s)
-        tPass = tPass + mPass(s)
-    Next k
-
-    SectionTitle g, 1, 6, Ar("gen_title")
-
-    ' ---------- 1 : registered / present / absent ----------
-    tit(1) = 3: hd(1) = 4: fr(1) = 5: lr(1) = 10: tt(1) = 11
-    SectionTitle g, tit(1), 4, Ar("g1")
-    PutHeads g, hd(1), Array(Ar("h_branch"), Ar("h_reg"), Ar("h_pres"), Ar("h_abs"))
-    StyleBlock g, fr(1), tt(1), 4
-    For k = 0 To 5
-        s = CLng(ord(k))
-        r = fr(1) + k
-        g.Cells(r, 1).Value2 = GenBranch(s)
-        g.Cells(r, 2).Value2 = mReg(s)
-        g.Cells(r, 3).Value2 = mPres(s)
-        g.Cells(r, 4).Value2 = mReg(s) - mPres(s)
-    Next k
-    g.Cells(tt(1), 1).Value2 = Ar("total")
-    g.Cells(tt(1), 2).Value2 = tReg
-    g.Cells(tt(1), 3).Value2 = tPres
-    g.Cells(tt(1), 4).Value2 = tReg - tPres
-    StyleTotalRow g, tt(1), 4
-    g.Range(g.Cells(fr(1), 2), g.Cells(tt(1), 4)).NumberFormat = FMT_COUNT
-
-    ' ---------- 2 : general results ----------
-    tit(2) = tt(1) + 2: hd(2) = tit(2) + 1: fr(2) = tit(2) + 2: lr(2) = fr(2) + 5: tt(2) = lr(2) + 1
-    SectionTitle g, tit(2), 4, Ar("g2")
-    PutHeads g, hd(2), Array(Ar("h_branch"), Ar("h_pres"), Ar("h_passed"), Ar("h_rate"))
-    StyleBlock g, fr(2), tt(2), 4
-    For k = 0 To 5
-        s = CLng(ord(k))
-        r = fr(2) + k
-        g.Cells(r, 1).Value2 = GenBranch(s)
-        g.Cells(r, 2).Value2 = mPres(s)
-        g.Cells(r, 3).Value2 = mPass(s)
-        PutRate g, r, 4, mPass(s), mPres(s)
-    Next k
-    g.Cells(tt(2), 1).Value2 = Ar("total")
-    g.Cells(tt(2), 2).Value2 = tPres
-    g.Cells(tt(2), 3).Value2 = tPass
-    PutRate g, tt(2), 4, tPass, tPres
-    StyleTotalRow g, tt(2), 4
-    g.Range(g.Cells(fr(2), 2), g.Cells(tt(2), 3)).NumberFormat = FMT_COUNT
-    g.Range(g.Cells(fr(2), 4), g.Cells(tt(2), 4)).NumberFormat = FMT_PCT
-
-    ' ---------- 3 : first semester vs second semester ----------
-    tit(3) = tt(2) + 2: hd(3) = tit(3) + 1: fr(3) = tit(3) + 2: lr(3) = fr(3) + 5: tt(3) = lr(3) + 1
-    SectionTitle g, tit(3), 4, Ar("g3")
-    PutHeads g, hd(3), Array(Ar("h_branch"), Ar("h_sem1"), Ar("h_sem2"), Ar("h_diff"))
-    StyleBlock g, fr(3), tt(3), 4
-    For k = 0 To 5
-        s = CLng(ord(k))
-        r = fr(3) + k
-        g.Cells(r, 1).Value2 = GenBranch(s)
-        PutRate g, r, 3, mPass(s), mPres(s)
-    Next k
-    g.Cells(tt(3), 1).Value2 = Ar("total")
-    PutRate g, tt(3), 3, tPass, tPres
-    StyleTotalRow g, tt(3), 4
-    g.Range(g.Cells(fr(3), 2), g.Cells(tt(3), 4)).NumberFormat = FMT_PCT
-    ' the only live formulas of the workbook: they depend on the manual column B
-    For r = fr(3) To tt(3)
-        g.Cells(r, 4).Formula = "=IF(OR(B" & r & "="""",C" & r & "=""""),"""",C" & r & "-B" & r & ")"
-    Next r
-    AddDiffFormat g, fr(3), tt(3), 4
-
-    ' ---------- 4 : last five seasons ----------
-    tit(4) = tt(3) + 2: hd(4) = tit(4) + 1: fr(4) = tit(4) + 2: lr(4) = fr(4) + 5: tt(4) = lr(4) + 1
+    hd = r0 + 1: fr = r0 + 2: lr = fr + nb - 1: tt = lr + 1
     If Month(Date) >= SEASON_START_MONTH Then yearStart = Year(Date) Else yearStart = Year(Date) - 1
-    SectionTitle g, tit(4), 6, Ar("g4")
-    g.Cells(hd(4), 1).Value2 = Ar("h_branch")
+    SectionTitle g, r0, 6, Ar(titleKey)
+    g.Cells(hd, 1).Value2 = Ar("h_branch")
     For j = 0 To 4
         y = yearStart - 4 + j
-        g.Cells(hd(4), 2 + j).NumberFormat = "@"
-        g.Cells(hd(4), 2 + j).Value2 = CStr(y) & "-" & CStr(y + 1)
+        g.Cells(hd, 2 + j).NumberFormat = "@"
+        g.Cells(hd, 2 + j).Value2 = CStr(y) & "-" & CStr(y + 1)
     Next j
-    StyleHead g.Range(g.Cells(hd(4), 1), g.Cells(hd(4), 6))
-    g.Rows(hd(4)).RowHeight = GEN_HEAD_HEIGHT
-    StyleBlock g, fr(4), tt(4), 6
-    For k = 0 To 5
-        s = CLng(ord(k))
-        r = fr(4) + k
+    StyleHead g.Range(g.Cells(hd, 1), g.Cells(hd, 6))
+    g.Rows(hd).RowHeight = GEN_HEAD_HEIGHT
+    StyleBlock g, fr, tt, 6
+    For k = 0 To nb - 1
+        s = ord(k)
+        r = fr + k
         g.Cells(r, 1).Value2 = GenBranch(s)
         PutRate g, r, 6, mPass(s), mPres(s)
     Next k
-    g.Cells(tt(4), 1).Value2 = Ar("total")
-    PutRate g, tt(4), 6, tPass, tPres
-    StyleTotalRow g, tt(4), 6
-    g.Range(g.Cells(fr(4), 2), g.Cells(tt(4), 6)).NumberFormat = FMT_PCT
-    ' highest = green / lowest = red per row (manual past seasons); helpers in hidden H:I
-    AddRowExtremesFormat g, fr(4), tt(4), 2, 6, 8, 9
-
-    On Error Resume Next
-    g.Activate
-    ActiveWindow.DisplayGridlines = False
-    With g.PageSetup
-        .Orientation = xlPortrait
-        .Zoom = False
-        .FitToPagesWide = 1
-        .FitToPagesTall = False
-        .CenterHorizontally = True
-    End With
-    On Error GoTo 0
-End Sub
+    g.Cells(tt, 1).Value2 = Ar("total")
+    PutRate g, tt, 6, tPass, tPres
+    StyleTotalRow g, tt, 6
+    g.Range(g.Cells(fr, 2), g.Cells(tt, 6)).NumberFormat = FMT_PCT
+    SeasonsSection = tt
+End Function
 
 ' ---------------------------------------------------------------------------
-' Conditional formatting for Gen (same look as modCompaire: green = better,
+' Conditional formatting for Gen (same look as modCompare: green = better,
 ' red = worse, white bold text).
 ' Locale-proof on purpose: every rule uses only operators and ABSOLUTE cell
 ' addresses (no function names, no list separators, no dependence on the
@@ -1543,7 +1596,7 @@ Private Sub AddDiffFormat(ByVal g As Worksheet, ByVal r1 As Long, ByVal r2 As Lo
     If failed Then mLayoutNotes = mLayoutNotes & vbLf & "Gen section 3: conditional formatting could not be applied."
 End Sub
 
-' Section 4: each row is compared on its own.
+' Past-seasons table: each row is compared on its own.
 '   highest value  -> green, lowest value -> red
 '   two cells tied at the highest (or lowest) -> both coloured
 '   three or more tied, all values equal, or fewer than two values -> nothing
@@ -1577,10 +1630,127 @@ Private Sub AddRowExtremesFormat(ByVal g As Worksheet, ByVal r1 As Long, ByVal r
     If failed Then mLayoutNotes = mLayoutNotes & vbLf & "Gen section 4: conditional formatting could not be applied."
 End Sub
 
+Private Sub BuildGen(ByVal g As Worksheet, ByVal level As Long)
+    Dim ord() As Long, nb As Long, base As Variant
+    Dim tit(1 To 4) As Long, hd(1 To 4) As Long, fr(1 To 4) As Long, lr(1 To 4) As Long, tt(1 To 4) As Long
+    Dim k As Long, s As Long, r As Long
+    Dim tReg As Long, tPres As Long, tPass As Long
+
+    ' classes of this level that have data, in report order
+    If level = 1 Then base = Array(1, 2, 3, 4, 5) Else base = Array(1, 2, 5, 3, 4, 6)
+    ReDim ord(0 To UBound(base))
+    For k = 0 To UBound(base)
+        s = CohortIndex(level, CLng(base(k)))
+        If mN(s) > 0 Then
+            ord(nb) = s
+            nb = nb + 1
+        End If
+    Next k
+    If nb = 0 Then Exit Sub
+
+    g.Name = "Gen"
+    g.DisplayRightToLeft = True
+    g.Cells.Font.Name = mFontBase
+    g.Cells.Font.Size = 14
+    g.Cells.VerticalAlignment = xlCenter
+    g.Columns("A").ColumnWidth = 30
+    g.Columns("B:J").ColumnWidth = 15
+
+    For k = 0 To nb - 1
+        s = ord(k)
+        tReg = tReg + mReg(s)
+        tPres = tPres + mPres(s)
+        tPass = tPass + mPass(s)
+    Next k
+
+    SectionTitle g, 1, 6, Ar("gen_title") & " - " & Ar("gen_level") & " " & Ar("lv" & CStr(level))
+
+    ' ---------- 1 : registered / present / absent ----------
+    tit(1) = 3: hd(1) = 4: fr(1) = 5: lr(1) = fr(1) + nb - 1: tt(1) = lr(1) + 1
+    SectionTitle g, tit(1), 4, Ar("g1")
+    PutHeads g, hd(1), Array(Ar("h_branch"), Ar("h_reg"), Ar("h_pres"), Ar("h_abs"))
+    StyleBlock g, fr(1), tt(1), 4
+    For k = 0 To nb - 1
+        s = ord(k)
+        r = fr(1) + k
+        g.Cells(r, 1).Value2 = GenBranch(s)
+        g.Cells(r, 2).Value2 = mReg(s)
+        g.Cells(r, 3).Value2 = mPres(s)
+        g.Cells(r, 4).Value2 = mReg(s) - mPres(s)
+    Next k
+    g.Cells(tt(1), 1).Value2 = Ar("total")
+    g.Cells(tt(1), 2).Value2 = tReg
+    g.Cells(tt(1), 3).Value2 = tPres
+    g.Cells(tt(1), 4).Value2 = tReg - tPres
+    StyleTotalRow g, tt(1), 4
+    g.Range(g.Cells(fr(1), 2), g.Cells(tt(1), 4)).NumberFormat = FMT_COUNT
+
+    ' ---------- 2 : general results ----------
+    tit(2) = tt(1) + 2: hd(2) = tit(2) + 1: fr(2) = tit(2) + 2: lr(2) = fr(2) + nb - 1: tt(2) = lr(2) + 1
+    SectionTitle g, tit(2), 4, Ar("g2")
+    PutHeads g, hd(2), Array(Ar("h_branch"), Ar("h_pres"), Ar("h_passed"), Ar("h_rate"))
+    StyleBlock g, fr(2), tt(2), 4
+    For k = 0 To nb - 1
+        s = ord(k)
+        r = fr(2) + k
+        g.Cells(r, 1).Value2 = GenBranch(s)
+        g.Cells(r, 2).Value2 = mPres(s)
+        g.Cells(r, 3).Value2 = mPass(s)
+        PutRate g, r, 4, mPass(s), mPres(s)
+    Next k
+    g.Cells(tt(2), 1).Value2 = Ar("total")
+    g.Cells(tt(2), 2).Value2 = tPres
+    g.Cells(tt(2), 3).Value2 = tPass
+    PutRate g, tt(2), 4, tPass, tPres
+    StyleTotalRow g, tt(2), 4
+    g.Range(g.Cells(fr(2), 2), g.Cells(tt(2), 3)).NumberFormat = FMT_COUNT
+    g.Range(g.Cells(fr(2), 4), g.Cells(tt(2), 4)).NumberFormat = FMT_PCT
+
+    ' first and second year: sections 1-2 only (comparisons removed on purpose)
+    If level = 3 Then
+        ' ---------- 3 : first semester vs second semester ----------
+        tit(3) = tt(2) + 2: hd(3) = tit(3) + 1: fr(3) = tit(3) + 2: lr(3) = fr(3) + nb - 1: tt(3) = lr(3) + 1
+        SectionTitle g, tit(3), 4, Ar("g3")
+        PutHeads g, hd(3), Array(Ar("h_branch"), Ar("h_sem1"), Ar("h_sem2"), Ar("h_diff"))
+        StyleBlock g, fr(3), tt(3), 4
+        For k = 0 To nb - 1
+            s = ord(k)
+            r = fr(3) + k
+            g.Cells(r, 1).Value2 = GenBranch(s)
+            PutRate g, r, 3, mPass(s), mPres(s)
+        Next k
+        g.Cells(tt(3), 1).Value2 = Ar("total")
+        PutRate g, tt(3), 3, tPass, tPres
+        StyleTotalRow g, tt(3), 4
+        g.Range(g.Cells(fr(3), 2), g.Cells(tt(3), 4)).NumberFormat = FMT_PCT
+        ' live formulas: they depend on the manual column B (semester 1)
+        For r = fr(3) To tt(3)
+            g.Cells(r, 4).Formula = "=IF(OR(B" & r & "="""",C" & r & "=""""),"""",C" & r & "-B" & r & ")"
+        Next r
+        AddDiffFormat g, fr(3), tt(3), 4
+
+        ' ---------- 4 : last five seasons (second semester) ----------
+        tt(4) = SeasonsSection(g, ord, nb, tt(3) + 2, "g4", tPass, tPres)
+        AddRowExtremesFormat g, tt(3) + 4, tt(4), 2, 6, 8, 9
+    End If
+
+    On Error Resume Next
+    g.Activate
+    ActiveWindow.DisplayGridlines = False
+    With g.PageSetup
+        .Orientation = xlPortrait
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = False
+        .CenterHorizontally = True
+    End With
+    On Error GoTo 0
+End Sub
+
 '==============================================================================
 '  Data-transfer summary sheet (kept for review) + processing notes
 '==============================================================================
-Private Sub WriteSummarySheet(ByVal ws As Worksheet, ByVal dictSummary As Object)
+Private Sub WriteSummarySheet(ByVal ws As Worksheet, ByVal dictSummary As Object, ByVal level As Long)
     Dim k As Variant, parts As Variant, outArr() As Variant
     Dim i As Long, n As Long, r As Long
     Dim keyCohort As String, keySubject As String
@@ -1595,19 +1765,26 @@ Private Sub WriteSummarySheet(ByVal ws As Worksheet, ByVal dictSummary As Object
     StyleHead ws.Range("A1:C1")
     ws.Rows(1).RowHeight = GEN_HEAD_HEIGHT
 
-    n = dictSummary.Count
+    ' only the entries of this level
+    n = 0
+    For Each k In dictSummary.Keys
+        parts = Split(CStr(k), "|")
+        If LevelOfName(parts(0)) = level Then n = n + 1
+    Next k
     r = 1
     If n > 0 Then
         ReDim outArr(1 To n, 1 To 3)
         i = 0
         For Each k In dictSummary.Keys
-            i = i + 1
             parts = Split(CStr(k), "|")
-            keyCohort = parts(0)
-            keySubject = parts(1)
-            If g_CohortDisplay.Exists(keyCohort) Then outArr(i, 1) = g_CohortDisplay(keyCohort) Else outArr(i, 1) = keyCohort
-            If g_SubjectDisplay.Exists(keySubject) Then outArr(i, 2) = g_SubjectDisplay(keySubject) Else outArr(i, 2) = keySubject
-            outArr(i, 3) = dictSummary(k)
+            If LevelOfName(parts(0)) = level Then
+                i = i + 1
+                keyCohort = parts(0)
+                keySubject = parts(1)
+                If g_CohortDisplay.Exists(keyCohort) Then outArr(i, 1) = g_CohortDisplay(keyCohort) Else outArr(i, 1) = keyCohort
+                If g_SubjectDisplay.Exists(keySubject) Then outArr(i, 2) = g_SubjectDisplay(keySubject) Else outArr(i, 2) = keySubject
+                outArr(i, 3) = dictSummary(k)
+            End If
         Next k
         ws.Range("A2").Resize(n, 3).Value2 = outArr
         With ws.Range("A2:C" & (n + 1))
@@ -1714,15 +1891,20 @@ End Function
 '==============================================================================
 '  Files
 '==============================================================================
+' FileSystemObject is Unicode-safe: GetAttr / Dir are ANSI and fail on Arabic names under some locales
+' (with Dir an existing Arabic-named output would not be seen and would be overwritten).
 Private Function FolderExists(ByVal p As String) As Boolean
     On Error Resume Next
-    FolderExists = ((GetAttr(p) And vbDirectory) = vbDirectory)
+    FolderExists = CreateObject("Scripting.FileSystemObject").FolderExists(p)
     If Err.Number <> 0 Then FolderExists = False
     Err.Clear
 End Function
 
 Private Function FileExists(ByVal fullPath As String) As Boolean
-    FileExists = (Len(Dir$(fullPath, vbNormal Or vbReadOnly Or vbHidden Or vbSystem Or vbArchive)) > 0)
+    On Error Resume Next
+    FileExists = CreateObject("Scripting.FileSystemObject").FileExists(fullPath)
+    If Err.Number <> 0 Then FileExists = False
+    Err.Clear
 End Function
 
 Private Function PathInUse(ByVal fullPath As String) As Boolean
@@ -1740,22 +1922,11 @@ Private Function PathInUse(ByVal fullPath As String) As Boolean
 End Function
 
 ' first file: <stem>.xlsx   then <stem>_01.xlsx, <stem>_02.xlsx ...
-Private Function NewOutputPath(ByVal folder As String, ByVal stem As String) As String
-    Dim fullPath As String, n As Long
-    fullPath = folder & Application.PathSeparator & stem & ".xlsx"
-    n = 0
-    Do While PathInUse(fullPath)
-        n = n + 1
-        fullPath = folder & Application.PathSeparator & stem & "_" & Format$(n, "00") & ".xlsx"
-    Loop
-    NewOutputPath = fullPath
-End Function
-
 '==============================================================================
 '  Output folder (created next to the tool workbook when missing)
 '==============================================================================
 Private Function OutputFolderName() As String
-    OutputFolderName = ArHex("0645 0639 0627 0644 062C 0629 0020 0628 064A 0627 0646 0627 062A 0020 0627 0644 0641 0635 0644 0020 0030 0032")
+    OutputFolderName = ArHex("645 639 627 644 62C 629 20 628 64A 627 646 627 62A 20 627 644 641 635 644 20 30 32")
 End Function
 
 Private Function EnsureFolder(ByVal p As String) As Boolean
@@ -1767,6 +1938,17 @@ Private Function EnsureFolder(ByVal p As String) As Boolean
         On Error GoTo 0
     End If
     EnsureFolder = FolderExists(p)
+End Function
+
+Private Function NewOutputPath(ByVal folder As String, ByVal stem As String) As String
+    Dim fullPath As String, n As Long
+    fullPath = folder & Application.PathSeparator & stem & ".xlsx"
+    n = 0
+    Do While PathInUse(fullPath)
+        n = n + 1
+        fullPath = folder & Application.PathSeparator & stem & "_" & Format$(n, "00") & ".xlsx"
+    Loop
+    NewOutputPath = fullPath
 End Function
 
 '==============================================================================
@@ -1781,6 +1963,47 @@ End Function
 
 Private Function Ar(ByVal key As String) As String
     Select Case key
+        Case "lv1": Ar = ArHex("623 648 644 649")
+        Case "lv2": Ar = ArHex("62B 627 646 64A 629")
+        Case "lv3": Ar = ArHex("62B 627 644 62B 629")
+        Case "title_base": Ar = ArHex("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 62E 62A 628 627 631 627 62A 20 627 644 641 635 644 20 627 644 62B 627 646 64A 20 2D 20 642 633 645")
+        Case "gen_level": Ar = ArHex("645 633 62A 648 649")
+        Case "out_name1": Ar = ArHex("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 62E 62A 628 627 631 627 62A 20 627 644 641 635 644 20 30 32 20 644 645 633 62A 648 649 20 623 648 644 649 20 62B 627 646 648 64A")
+        Case "out_name2": Ar = ArHex("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 62E 62A 628 627 631 627 62A 20 627 644 641 635 644 20 30 32 20 644 645 633 62A 648 649 20 62B 627 646 64A 629 20 62B 627 646 648 64A")
+        Case "out_name3": Ar = ArHex("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 62E 62A 628 627 631 627 62A 20 627 644 641 635 644 20 30 32 20 644 645 633 62A 648 649 20 62B 627 644 62B 629 20 62B 627 646 648 64A")
+        Case "no_valid": Ar = ArHex("644 645 20 64A 64F 639 62B 631 20 639 644 649 20 628 64A 627 646 627 62A 20 635 627 644 62D 629 20 644 623 64A 20 645 633 62A 648 649 60C 20 641 644 645 20 64A 64F 646 634 623 20 623 64A 20 645 644 641 2E")
+        Case "k_first": Ar = ArHex("627 648 644 64A")
+        Case "k_second": Ar = ArHex("62B 627 646 64A 647")
+        Case "k_art": Ar = ArHex("641 646 64A 647")
+        Case "k_art2": Ar = ArHex("62A 634 643 64A 644")
+        Case "k_inf": Ar = ArHex("627 639 644 627 645")
+        Case "k_inf2": Ar = ArHex("645 639 644 648 645 627 62A")
+        Case "k_tech": Ar = ArHex("62A 643 646 648 644 648 62C")
+        Case "sj15": Ar = ArHex("627 644 62A 631 628 64A 629 20 627 644 641 646 64A 629")
+        Case "sj16": Ar = ArHex("627 644 625 639 644 627 645 20 627 644 622 644 64A")
+        Case "sj17": Ar = ArHex("627 644 62A 643 646 648 644 648 62C 64A 627")
+        Case "bn7": Ar = ArHex("622 62F 627 628 20 648 641 644 633 641 629")
+        Case "bn8": Ar = ArHex("644 63A 627 62A 20 623 62C 646 628 64A 629")
+        Case "bn9": Ar = ArHex("639 644 648 645 20 62A 62C 631 64A 628 64A 629 20 30 31")
+        Case "bn10": Ar = ArHex("639 644 648 645 20 62A 62C 631 64A 628 64A 629 20 30 32")
+        Case "bn11": Ar = ArHex("631 64A 627 636 64A 627 62A")
+        Case "bn12": Ar = ArHex("62A 633 64A 64A 631 20 648 627 642 62A 635 627 62F")
+        Case "bn13": Ar = ArHex("62C 630 639 20 645 634 62A 631 643 20 622 62F 627 628")
+        Case "bn14": Ar = ArHex("62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 648 62A 643 646 648 644 648 62C 64A 627 20 30 31")
+        Case "bn15": Ar = ArHex("62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 648 62A 643 646 648 644 648 62C 64A 627 20 30 32")
+        Case "bn16": Ar = ArHex("62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 648 62A 643 646 648 644 648 62C 64A 627 20 30 33")
+        Case "bn17": Ar = ArHex("62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 648 62A 643 646 648 644 648 62C 64A 627 20 30 34")
+        Case "gb7": Ar = ArHex("32 20 622 62F 627 628 20 648 641 644 633 641 629")
+        Case "gb8": Ar = ArHex("32 20 644 63A 627 62A 20 623 62C 646 628 64A 629")
+        Case "gb9": Ar = ArHex("32 20 639 644 648 645 20 62A 62C 20 30 31")
+        Case "gb10": Ar = ArHex("32 20 639 644 648 645 20 62A 62C 20 30 32")
+        Case "gb11": Ar = ArHex("32 20 631 64A 627 636 64A 627 62A")
+        Case "gb12": Ar = ArHex("32 20 62A 633 64A 64A 631 20 648 627 642 62A 635 627 62F")
+        Case "gb13": Ar = ArHex("31 20 62C 630 639 20 645 634 62A 631 643 20 622 62F 627 628")
+        Case "gb14": Ar = ArHex("31 20 62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 30 31")
+        Case "gb15": Ar = ArHex("31 20 62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 30 32")
+        Case "gb16": Ar = ArHex("31 20 62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 30 33")
+        Case "gb17": Ar = ArHex("31 20 62C 630 639 20 645 634 62A 631 643 20 639 644 648 645 20 30 34")
         Case "working": Ar = ArHex("62C 627 631 64D 20 627 644 62A 62D 636 64A 631 3A")
         Case "fonts": Ar = ArHex("62A 645 20 627 633 62A 628 62F 627 644 20 62E 637 648 637 20 63A 64A 631 20 645 62A 648 641 631 629 20 628 62E 637 648 637 20 628 62F 64A 644 629 3A")
         Case "layout_warn": Ar = ArHex("62A 646 628 64A 647 3A 20 62A 639 630 631 20 636 628 637 20 627 644 623 628 639 627 62F 20 627 644 62A 627 644 64A 629 20 643 645 627 20 647 648 20 645 637 644 648 628 3A")
@@ -1833,9 +2056,10 @@ Private Function Ar(ByVal key As String) As String
         Case "sj13": Ar = ArHex("627 644 642 627 646 648 646")
         Case "sj14": Ar = ArHex("62A 20 628 62F 646 64A 629 20 648 631 64A 627 636 64A 629")
         Case "app_title2": Ar = ArHex("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 644 627 62E 62A 628 627 631 627 62A")
-        Case "out_name": Ar = ArHex("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 644 627 62E 62A 628 627 631 627 62A 20 30 32")
         Case "save_tool": Ar = ArHex("627 62D 641 638 20 645 644 641 20 627 644 623 62F 627 629 20 623 648 644 627 64B 20 641 64A 20 645 62C 644 62F 60C 20 62B 645 20 636 639 20 645 62C 644 62F 20 627 644 645 635 62F 631 20 628 62C 627 646 628 647 2E")
         Case "no_folder": Ar = ArHex("644 645 20 623 62C 62F 20 645 62C 644 62F 20 627 644 645 635 62F 631 20 628 62C 627 646 628 20 645 644 641 20 627 644 623 62F 627 629 3A")
+        Case "no_out_folder": Ar = ArHex("62A 639 630 631 20 625 646 634 627 621 20 645 62C 644 62F 20 627 644 645 62E 631 62C 627 62A 3A")
+        Case "saved_before": Ar = ArHex("627 644 645 644 641 627 62A 20 627 644 62A 64A 20 62D 641 638 62A 20 642 628 644 20 627 644 62E 637 623 3A")
         Case "no_files": Ar = ArHex("644 627 20 62A 648 62C 62F 20 645 644 641 627 62A 20 78 6C 73 78 20 641 64A 20 645 62C 644 62F 20 627 644 645 635 62F 631 3A")
         Case "see_sheet": Ar = ArHex("627 644 62A 641 627 635 64A 644 20 627 644 643 627 645 644 629 20 641 64A 20 648 631 642 629 20 AB 646 642 644 20 627 644 628 64A 627 646 627 62A BB 2E")
         Case "ok_all": Ar = ArHex("639 648 644 62C 62A 20 643 644 20 627 644 645 644 641 627 62A 20 628 646 62C 627 62D 20 62F 648 646 20 62A 639 627 631 636 627 62A 2E")
@@ -1906,7 +2130,6 @@ Private Function Ar(ByVal key As String) As String
         Case "gb4": Ar = ArHex("33 20 639 644 648 645 20 62A 62C 20 30 32")
         Case "gb5": Ar = ArHex("33 20 631 64A 627 636 64A 627 62A")
         Case "gb6": Ar = ArHex("33 20 62A 633 64A 64A 631 20 648 627 642 62A 635 627 62F")
-        Case "title_main2": Ar = ArHex("62A 62D 644 64A 644 20 646 62A 627 626 62C 20 627 62E 62A 628 627 631 627 62A 20 627 644 641 635 644 20 627 644 62B 627 646 64A 20 2D 20 642 633 645 20 62B 627 644 62B 629")
         Case "s_exempt": Ar = ArHex("627 644 645 639 641 64A 648 646")
         Case "cls01": Ar = ArHex("627 644 641 626 629 20 30 31")
         Case "cls02": Ar = ArHex("627 644 641 626 629 20 30 32")
