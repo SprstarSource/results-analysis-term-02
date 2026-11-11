@@ -13,7 +13,7 @@ Option Explicit
 '                                                    if it stops, a copy is saved)
 '    3. modOrientation02         Orientation         decisions + general report, then the workbook is SAVED
 '                                                    -> \معالجة بيانات الفصل 02\Term02Guidance[_NN].xlsx
-'    4. modOrientationResults02  Export results      -> \معالجة بيانات الفصل 02\OrientationResults02[_NN].xlsx
+'    4. modOrientationResults02  Export results      -> \معالجة بيانات الفصل 02\نتائج التوجيه التدريجي للفصل 02[_NN].xlsx
 '
 ' Runs all steps silently and shows ONE consolidated message at the end
 ' (or ONE diagnostic message if a step stops).
@@ -24,9 +24,11 @@ Private Const TITLE_TXT As String = "Term 02 Orientation"
 Private Const SRC_FOLDER As String = "Source02"
 
 Private m_busy As Boolean
+Private m_runSucceeded As Boolean
 
 Public Sub ResetOrientationState()
     m_busy = False
+    m_runSucceeded = False
     On Error Resume Next
     modTransfer02.SetSilentMode False
     modStreamPreferences02.SetSilentMode False
@@ -40,12 +42,16 @@ Public Sub ResetOrientationState()
     On Error GoTo 0
 End Sub
 
+Public Function OrientationAll02Succeeded() As Boolean
+    OrientationAll02Succeeded = m_runSucceeded
+End Function
+
 Public Sub Run_OrientationAll02()
     Dim base As String, problem As String, t0 As Date, outPath As String, secs As Long
     Dim finalMsg As String
 
-    ' Always clear any stale lock from a previously interrupted session
-    m_busy = False
+    If m_busy Then Exit Sub
+    m_runSucceeded = False
 
     base = ThisWorkbook.Path
     If Len(base) = 0 Then
@@ -111,6 +117,7 @@ Public Sub Run_OrientationAll02()
                "[3] Orientation:" & vbCrLf & modOrientation02.LastReport() & vbCrLf & vbCrLf & _
                "[4] Export Results:" & vbCrLf & modOrientationResults02.LastReport()
 
+    m_runSucceeded = True
     MsgBox finalMsg, vbInformation, TITLE_TXT
 
 Finished:

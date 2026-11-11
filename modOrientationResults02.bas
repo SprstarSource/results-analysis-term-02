@@ -7,7 +7,7 @@ Option Explicit
 '   Export the final guidance results from the guidance workbook (the one kept in memory by
 '   modTransfer02; the guidance workbook file of the output folder when none is open) to a separate
 '   workbook inside folder "معالجة بيانات الفصل 02" with sequential naming:
-'   OrientationResults02.xlsx, OrientationResults02_01.xlsx, OrientationResults02_02.xlsx, ...
+'   "نتائج التوجيه التدريجي للفصل 02.xlsx", then the same name + _01, _02, ...
 '
 ' Output:
 '   - Saved inside subfolder "معالجة بيانات الفصل 02" (created when missing).
@@ -25,6 +25,7 @@ Private m_silent As Boolean
 Private m_lastReport As String
 Private m_lastOutputPath As String
 
+' Base file name: "نتائج التوجيه التدريجي للفصل 02" stored as hex code points
 Private Const OUTPUT_BASE_CODES As String = "646 62A 627 626 62C 20 627 644 62A 648 62C 64A 647 20 627 644 62A 62F 631 64A 62C 64A 20 644 644 641 635 644 20 30 32"
 Private Const OUTPUT_EXT As String = ".xlsx"
 
@@ -275,7 +276,7 @@ Private Function GetNextAvailableOutputPath(ByVal folderPath As String) As Strin
 
     Set fso = CreateObject("Scripting.FileSystemObject")
 
-    ' First try OrientationResults02.xlsx; if it exists or is open, try _01, _02, ...
+    ' First try the base name + .xlsx; if it exists or is open, try _01, _02, ...
     candidateName = OutputBaseName() & OUTPUT_EXT
     candidatePath = folderPath & candidateName
     If Not fso.FileExists(candidatePath) And Not IsWorkbookNameOpen(candidateName) Then
