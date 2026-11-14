@@ -97,6 +97,9 @@ CleanExit:
           "   skipped: " & srcSkipped & vbCrLf & vbCrLf & report
     If Len(srcNotes) > 0 Then msg = msg & vbCrLf & "Source notes:" & vbCrLf & srcNotes
     If Len(fatalMsg) > 0 Then msg = msg & vbCrLf & "ERROR: " & fatalMsg
+    On Error Resume Next
+    modBuildPanel02.RefreshPanelState      ' list the new file on the ControlPanel at once
+    On Error GoTo 0
     MsgBox msg, IIf(okCount = 2 And Len(fatalMsg) = 0, vbInformation, vbExclamation), "Split Term Results"
 End Sub
 

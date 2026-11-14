@@ -67,6 +67,10 @@ Public Sub Build_All()
     Set map = baf_GetFileMap()
     total = map.Count
     Status_Reset map
+    For idx = 1 To total
+        modBuildPanel02.Panel_RecordFileDuration idx, 0     ' forget the durations of the previous run
+    Next idx
+    idx = 0
 
     Application.StatusBar = "Second Term Analysis : checking fonts ..."
     baf_EnsureFonts
@@ -118,6 +122,8 @@ Public Sub Build_All()
 
         secs = Timer - t1
         If secs < 0 Then secs = secs + 86400
+        ' real duration of this file, read by the ControlPanel (only a finished file keeps one)
+        If errMsg = "" Then modBuildPanel02.Panel_RecordFileDuration idx, secs
 
         If errMsg = "" Then
             okCount = okCount + 1

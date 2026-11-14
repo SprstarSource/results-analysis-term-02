@@ -48,7 +48,7 @@ End Function
 
 Public Sub Run_OrientationAll02()
     Dim base As String, problem As String, t0 As Date, outPath As String, secs As Long
-    Dim finalMsg As String
+    Dim finalMsg As String, tStep As Double, i As Long
 
     If m_busy Then Exit Sub
     m_runSucceeded = False
@@ -76,32 +76,42 @@ Public Sub Run_OrientationAll02()
     On Error GoTo Failed
     Application.EnableCancelKey = xlErrorHandler
     t0 = Now
+    For i = 1 To 4
+        modBuildPanel02.Panel_RecordStepDuration i, 0       ' forget the durations of the previous run
+    Next i
 
     ' ---- 1. data transfer (silent)
+    tStep = Timer
     modTransfer02.SetSilentMode True
     modTransfer02.Run_Transfer02
     If Not modTransfer02.Transfer02Succeeded() Then
         StopAt 1, "Data Transfer", modTransfer02.LastReport()
         GoTo Finished
     End If
+    modBuildPanel02.Panel_RecordStepDuration 1, ElapsedSince(tStep)
 
     ' ---- 2. stream preferences / wishes (silent)
+    tStep = Timer
     modStreamPreferences02.SetSilentMode True
     modStreamPreferences02.Run_StreamPreferences02
     If Not modStreamPreferences02.Preferences02Succeeded() Then
         StopAt 2, "Stream Preferences", modStreamPreferences02.LastReport()
         GoTo Finished
     End If
+    modBuildPanel02.Panel_RecordStepDuration 2, ElapsedSince(tStep)
 
     ' ---- 3. orientation (silent)
+    tStep = Timer
     modOrientation02.SetSilentMode True
     modOrientation02.Run_Orientation02
     If Not modOrientation02.Orientation02Succeeded() Then
         StopAt 3, "Orientation", modOrientation02.LastReport()
         GoTo Finished
     End If
+    modBuildPanel02.Panel_RecordStepDuration 3, ElapsedSince(tStep)
 
     ' ---- 4. export results (silent)
+    tStep = Timer
     modOrientationResults02.SetSilentMode True
     modOrientationResults02.Run_OrientationResults02
     outPath = modOrientationResults02.Results02OutputPath()
@@ -109,6 +119,7 @@ Public Sub Run_OrientationAll02()
         StopAt 4, "Export Orientation Results", modOrientationResults02.LastReport()
         GoTo Finished
     End If
+    modBuildPanel02.Panel_RecordStepDuration 4, ElapsedSince(tStep)
 
     secs = CLng((Now - t0) * 86400)
     finalMsg = "All 4 steps completed (" & secs & " s):" & vbCrLf & vbCrLf & _
@@ -133,6 +144,7 @@ Finished:
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     Application.EnableCancelKey = xlInterrupt
+    modBuildPanel02.RefreshPanelState      ' update the status and duration columns of the ControlPanel
     On Error GoTo 0
     Exit Sub
 
@@ -144,6 +156,11 @@ Failed:
     End If
     Resume Finished
 End Sub
+
+Private Function ElapsedSince(ByVal t As Double) As Double
+    ElapsedSince = Timer - t
+    If ElapsedSince < 0 Then ElapsedSince = ElapsedSince + 86400
+End Function
 
 Private Sub StopAt(ByVal stepNo As Long, ByVal stepName As String, ByVal stepReport As String)
     Dim msg As String

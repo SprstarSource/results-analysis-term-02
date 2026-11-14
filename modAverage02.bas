@@ -139,6 +139,9 @@ CleanExit:
     If Len(details) > 0 Then report = report & vbCrLf & vbCrLf & details
     If Len(srcNotes) > 0 Then report = report & vbCrLf & vbCrLf & "Source notes:" & vbCrLf & srcNotes
     If Len(fatalMsg) > 0 Then report = report & vbCrLf & "ERROR: " & fatalMsg
+    On Error Resume Next
+    modBuildPanel02.RefreshPanelState      ' list the new file on the ControlPanel at once
+    On Error GoTo 0
     MsgBox report, IIf(saved And errorCells = 0 And nonNumericCells = 0, vbInformation, vbExclamation), "Cumulative Term Average Report"
 End Sub
 
